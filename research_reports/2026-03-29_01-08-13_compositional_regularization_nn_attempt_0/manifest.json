@@ -1,308 +1,308 @@
 {
   "source_experiment_dir": "experiments/2026-03-29_01-08-13_compositional_regularization_nn_attempt_0",
   "snapshot_dir": "research_reports/2026-03-29_01-08-13_compositional_regularization_nn_attempt_0",
-  "snapshot_time_utc": "2026-03-29T01:53:12.510627+00:00",
+  "snapshot_time_utc": "2026-03-29T01:53:14.966133+00:00",
   "file_count": 60,
   "files": [
     {
       "path": "bfts_config.yaml",
       "size_bytes": 1194,
-      "mtime_utc": "2026-03-29T01:53:12.247594+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.759617+00:00"
     },
     {
       "path": "idea.json",
       "size_bytes": 4490,
-      "mtime_utc": "2026-03-29T01:53:12.241594+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.756617+00:00"
     },
     {
       "path": "idea.md",
       "size_bytes": 4341,
-      "mtime_utc": "2026-03-29T01:53:12.235594+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.753617+00:00"
     },
     {
       "path": "manifest.json",
       "size_bytes": 13273,
-      "mtime_utc": "2026-03-29T01:51:40.379773+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.726616+00:00"
     },
     {
       "path": "logs/0-run/unified_tree_viz.html",
       "size_bytes": 267084,
-      "mtime_utc": "2026-03-29T01:53:12.254594+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.762617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_b8d8fd9117614bf7ae713d5420a5033f_proc_6581/experiment_code.py",
       "size_bytes": 8021,
-      "mtime_utc": "2026-03-29T01:53:12.302595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.794617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_b8d8fd9117614bf7ae713d5420a5033f_proc_6581/plotting_code.py",
       "size_bytes": 4480,
-      "mtime_utc": "2026-03-29T01:53:12.300595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.791617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_b8d8fd9117614bf7ae713d5420a5033f_proc_6581/synthetic_compositional_accuracy.png",
       "size_bytes": 47532,
-      "mtime_utc": "2026-03-29T01:53:12.304595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.797617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_b8d8fd9117614bf7ae713d5420a5033f_proc_6581/synthetic_compositional_accuracy_curves.png",
       "size_bytes": 61565,
-      "mtime_utc": "2026-03-29T01:53:12.313595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.805617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_b8d8fd9117614bf7ae713d5420a5033f_proc_6581/synthetic_compositional_loss.png",
       "size_bytes": 49514,
-      "mtime_utc": "2026-03-29T01:53:12.307595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.801617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_b8d8fd9117614bf7ae713d5420a5033f_proc_6581/synthetic_compositional_loss_curves.png",
       "size_bytes": 64002,
-      "mtime_utc": "2026-03-29T01:53:12.319595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.808617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_b8d8fd9117614bf7ae713d5420a5033f_proc_6581/synthetic_compositional_synthetic_compositional_baseline_confusion_matrix.png",
       "size_bytes": 23018,
-      "mtime_utc": "2026-03-29T01:53:12.325595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.811617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_b8d8fd9117614bf7ae713d5420a5033f_proc_6581/synthetic_compositional_synthetic_compositional_regularized_confusion_matrix.png",
       "size_bytes": 23150,
-      "mtime_utc": "2026-03-29T01:53:12.330595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.815617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_1f16a5b52c304e0a801ce1e49cd4557a_proc_6580/experiment_code.py",
       "size_bytes": 8222,
-      "mtime_utc": "2026-03-29T01:53:12.339595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.821617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_1f16a5b52c304e0a801ce1e49cd4557a_proc_6580/plotting_code.py",
       "size_bytes": 4480,
-      "mtime_utc": "2026-03-29T01:53:12.333595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.818617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_1f16a5b52c304e0a801ce1e49cd4557a_proc_6580/synthetic_compositional_accuracy.png",
       "size_bytes": 47532,
-      "mtime_utc": "2026-03-29T01:53:12.346595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.827617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_1f16a5b52c304e0a801ce1e49cd4557a_proc_6580/synthetic_compositional_accuracy_curves.png",
       "size_bytes": 61565,
-      "mtime_utc": "2026-03-29T01:53:12.350595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.834617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_1f16a5b52c304e0a801ce1e49cd4557a_proc_6580/synthetic_compositional_curves.png",
       "size_bytes": 78374,
-      "mtime_utc": "2026-03-29T01:53:12.344595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.824617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_1f16a5b52c304e0a801ce1e49cd4557a_proc_6580/synthetic_compositional_loss.png",
       "size_bytes": 49514,
-      "mtime_utc": "2026-03-29T01:53:12.348595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.831617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_1f16a5b52c304e0a801ce1e49cd4557a_proc_6580/synthetic_compositional_loss_curves.png",
       "size_bytes": 64002,
-      "mtime_utc": "2026-03-29T01:53:12.356595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.837617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_1f16a5b52c304e0a801ce1e49cd4557a_proc_6580/synthetic_compositional_synthetic_compositional_baseline_confusion_matrix.png",
       "size_bytes": 23018,
-      "mtime_utc": "2026-03-29T01:53:12.361595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.841617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_1f16a5b52c304e0a801ce1e49cd4557a_proc_6580/synthetic_compositional_synthetic_compositional_regularized_confusion_matrix.png",
       "size_bytes": 23150,
-      "mtime_utc": "2026-03-29T01:53:12.367595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.845617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_be2b94c260d442dea4d38fd817f0eeef_proc_6581/experiment_code.py",
       "size_bytes": 8222,
-      "mtime_utc": "2026-03-29T01:53:12.375595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.852618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_be2b94c260d442dea4d38fd817f0eeef_proc_6581/plotting_code.py",
       "size_bytes": 4480,
-      "mtime_utc": "2026-03-29T01:53:12.371595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.848617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_be2b94c260d442dea4d38fd817f0eeef_proc_6581/synthetic_compositional_accuracy.png",
       "size_bytes": 47532,
-      "mtime_utc": "2026-03-29T01:53:12.381595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.855618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_be2b94c260d442dea4d38fd817f0eeef_proc_6581/synthetic_compositional_accuracy_curves.png",
       "size_bytes": 61565,
-      "mtime_utc": "2026-03-29T01:53:12.390595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.863617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_be2b94c260d442dea4d38fd817f0eeef_proc_6581/synthetic_compositional_loss.png",
       "size_bytes": 49514,
-      "mtime_utc": "2026-03-29T01:53:12.386595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.858618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_be2b94c260d442dea4d38fd817f0eeef_proc_6581/synthetic_compositional_loss_curves.png",
       "size_bytes": 64002,
-      "mtime_utc": "2026-03-29T01:53:12.394595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.866617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_be2b94c260d442dea4d38fd817f0eeef_proc_6581/synthetic_compositional_synthetic_compositional_baseline_confusion_matrix.png",
       "size_bytes": 23018,
-      "mtime_utc": "2026-03-29T01:53:12.399595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.869617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_be2b94c260d442dea4d38fd817f0eeef_proc_6581/synthetic_compositional_synthetic_compositional_regularized_confusion_matrix.png",
       "size_bytes": 23150,
-      "mtime_utc": "2026-03-29T01:53:12.405596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.872617+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/experiment_code.py",
       "size_bytes": 8222,
-      "mtime_utc": "2026-03-29T01:53:12.416596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.878618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/plotting_code.py",
       "size_bytes": 4480,
-      "mtime_utc": "2026-03-29T01:53:12.411596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.874618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/synthetic_compositional_accuracy.png",
       "size_bytes": 47532,
-      "mtime_utc": "2026-03-29T01:53:12.430596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.890618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/synthetic_compositional_accuracy_curves.png",
       "size_bytes": 61565,
-      "mtime_utc": "2026-03-29T01:53:12.436596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.897618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/synthetic_compositional_confusion.png",
       "size_bytes": 33379,
-      "mtime_utc": "2026-03-29T01:53:12.426596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.887618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/synthetic_compositional_curves.png",
       "size_bytes": 60270,
-      "mtime_utc": "2026-03-29T01:53:12.421596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.882618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/synthetic_compositional_loss.png",
       "size_bytes": 49514,
-      "mtime_utc": "2026-03-29T01:53:12.433596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.894618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/synthetic_compositional_loss_curves.png",
       "size_bytes": 64002,
-      "mtime_utc": "2026-03-29T01:53:12.439596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.901618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/synthetic_compositional_synthetic_compositional_baseline_confusion_matrix.png",
       "size_bytes": 23018,
-      "mtime_utc": "2026-03-29T01:53:12.442596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.904618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_61440bcf545a43b9829590fe6157b447_proc_6579/synthetic_compositional_synthetic_compositional_regularized_confusion_matrix.png",
       "size_bytes": 23150,
-      "mtime_utc": "2026-03-29T01:53:12.446596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.907618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/seed_aggregation_0392327846344dc5a1c2edc33c6f4a54/synthetic_compositional_baseline_aggregated_accuracy_curves.png",
       "size_bytes": 44627,
-      "mtime_utc": "2026-03-29T01:53:12.449596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.910618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/seed_aggregation_0392327846344dc5a1c2edc33c6f4a54/synthetic_compositional_baseline_aggregated_confusion_matrix.png",
       "size_bytes": 26969,
-      "mtime_utc": "2026-03-29T01:53:12.470596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.929618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/seed_aggregation_0392327846344dc5a1c2edc33c6f4a54/synthetic_compositional_baseline_aggregated_loss_curves.png",
       "size_bytes": 43591,
-      "mtime_utc": "2026-03-29T01:53:12.455596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.916618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/seed_aggregation_0392327846344dc5a1c2edc33c6f4a54/synthetic_compositional_baseline_val_accuracy_across_runs.png",
       "size_bytes": 30497,
-      "mtime_utc": "2026-03-29T01:53:12.462596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.923618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/seed_aggregation_0392327846344dc5a1c2edc33c6f4a54/synthetic_compositional_regularized_aggregated_accuracy_curves.png",
       "size_bytes": 43840,
-      "mtime_utc": "2026-03-29T01:53:12.452596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.913618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/seed_aggregation_0392327846344dc5a1c2edc33c6f4a54/synthetic_compositional_regularized_aggregated_confusion_matrix.png",
       "size_bytes": 27554,
-      "mtime_utc": "2026-03-29T01:53:12.474596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.932618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/seed_aggregation_0392327846344dc5a1c2edc33c6f4a54/synthetic_compositional_regularized_aggregated_loss_curves.png",
       "size_bytes": 47070,
-      "mtime_utc": "2026-03-29T01:53:12.459596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.920618+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/seed_aggregation_0392327846344dc5a1c2edc33c6f4a54/synthetic_compositional_regularized_val_accuracy_across_runs.png",
       "size_bytes": 31120,
-      "mtime_utc": "2026-03-29T01:53:12.466596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.926618+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/best_solution_b8d8fd9117614bf7ae713d5420a5033f.py",
       "size_bytes": 8021,
-      "mtime_utc": "2026-03-29T01:53:12.496596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.951618+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/config.yaml",
       "size_bytes": 1713,
-      "mtime_utc": "2026-03-29T01:53:12.488596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.943618+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/journal.json",
       "size_bytes": 236361,
-      "mtime_utc": "2026-03-29T01:53:12.483596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.939618+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/tree_plot.html",
       "size_bytes": 267056,
-      "mtime_utc": "2026-03-29T01:53:12.492596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.947618+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/notes/stage_progress.json",
       "size_bytes": 12640,
-      "mtime_utc": "2026-03-29T01:53:12.479596+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.936618+00:00"
     },
     {
       "path": "0-run/runfile.py",
       "size_bytes": 11769,
-      "mtime_utc": "2026-03-29T01:53:12.281595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.777617+00:00"
     },
     {
       "path": "0-run/process_ForkProcess-1/runfile.py",
       "size_bytes": 4480,
-      "mtime_utc": "2026-03-29T01:53:12.261594+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.766617+00:00"
     },
     {
       "path": "0-run/process_ForkProcess-2/runfile.py",
       "size_bytes": 4480,
-      "mtime_utc": "2026-03-29T01:53:12.269594+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.770617+00:00"
     },
     {
       "path": "0-run/process_ForkProcess-3/runfile.py",
       "size_bytes": 4480,
-      "mtime_utc": "2026-03-29T01:53:12.274594+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.773617+00:00"
     },
     {
       "path": "0-run/process_ForkProcess-5/runfile.py",
       "size_bytes": 3133,
-      "mtime_utc": "2026-03-29T01:53:12.285594+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.780617+00:00"
     },
     {
       "path": "0-run/process_ForkProcess-6/runfile.py",
       "size_bytes": 3220,
-      "mtime_utc": "2026-03-29T01:53:12.291595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.783617+00:00"
     },
     {
       "path": "0-run/process_ForkProcess-7/runfile.py",
       "size_bytes": 5700,
-      "mtime_utc": "2026-03-29T01:53:12.297595+00:00"
+      "mtime_utc": "2026-03-29T01:53:14.787617+00:00"
     }
   ]
 }
