@@ -1,12 +1,53 @@
 import os
-import requests
 import time
 import warnings
 from typing import Dict, List, Optional, Union
 
 import backoff
+import requests
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 from ai_scientist.tools.base_tool import BaseTool
+
+
+def _respect_shared_rate_limit() -> None:
+    """Coordinate Semantic Scholar requests across local processes."""
+    min_interval = float(os.getenv("S2_MIN_INTERVAL_SEC", "1.05"))
+    if min_interval <= 0:
+        return
+
+    rate_limit_file = os.getenv(
+        "S2_RATE_LIMIT_FILE", "/tmp/ai_scientist_s2_rate_limit.txt"
+    )
+
+    if fcntl is None:
+        time.sleep(min_interval)
+        return
+
+    os.makedirs(os.path.dirname(rate_limit_file), exist_ok=True)
+    with open(rate_limit_file, "a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        handle.seek(0)
+        raw_timestamp = handle.read().strip()
+        try:
+            last_request_ts = float(raw_timestamp) if raw_timestamp else 0.0
+        except ValueError:
+            last_request_ts = 0.0
+
+        wait_seconds = last_request_ts + min_interval - time.time()
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{time.time():.6f}")
+        handle.flush()
+        os.fsync(handle.fileno())
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def on_backoff(details: Dict) -> None:
@@ -57,11 +98,12 @@ class SemanticScholarSearchTool(BaseTool):
     def search_for_papers(self, query: str) -> Optional[List[Dict]]:
         if not query:
             return None
-        
+
         headers = {}
         if self.S2_API_KEY:
             headers["X-API-KEY"] = self.S2_API_KEY
-        
+
+        _respect_shared_rate_limit()
         rsp = requests.get(
             "https://api.semanticscholar.org/graph/v1/paper/search",
             headers=headers,
@@ -110,10 +152,11 @@ def search_for_papers(query, result_limit=10) -> Union[None, List[Dict]]:
         )
     else:
         headers["X-API-KEY"] = S2_API_KEY
-    
+
     if not query:
         return None
-    
+
+    _respect_shared_rate_limit()
     rsp = requests.get(
         "https://api.semanticscholar.org/graph/v1/paper/search",
         headers=headers,
@@ -130,7 +173,6 @@ def search_for_papers(query, result_limit=10) -> Union[None, List[Dict]]:
     rsp.raise_for_status()
     results = rsp.json()
     total = results["total"]
-    time.sleep(1.0)
     if not total:
         return None
 
