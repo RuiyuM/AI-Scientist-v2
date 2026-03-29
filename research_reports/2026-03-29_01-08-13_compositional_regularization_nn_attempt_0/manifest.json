@@ -1,0 +1,28 @@
+{
+  "source_experiment_dir": "experiments/2026-03-29_01-08-13_compositional_regularization_nn_attempt_0",
+  "snapshot_dir": "research_reports/2026-03-29_01-08-13_compositional_regularization_nn_attempt_0",
+  "snapshot_time_utc": "2026-03-29T01:15:15.638877+00:00",
+  "file_count": 4,
+  "files": [
+    {
+      "path": "idea.json",
+      "size_bytes": 4490,
+      "mtime_utc": "2026-03-29T01:15:15.624028+00:00"
+    },
+    {
+      "path": "idea.md",
+      "size_bytes": 4341,
+      "mtime_utc": "2026-03-29T01:15:15.619028+00:00"
+    },
+    {
+      "path": "manifest.json",
+      "size_bytes": 684,
+      "mtime_utc": "2026-03-29T01:11:06.891656+00:00"
+    },
+    {
+      "path": "logs/0-run/unified_tree_viz.html",
+      "size_bytes": 267084,
+      "mtime_utc": "2026-03-29T01:15:15.630028+00:00"
+    }
+  ]
+}

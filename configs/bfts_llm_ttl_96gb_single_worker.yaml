@@ -1,0 +1,65 @@
+# Single-worker config for running multiple top-level AI-Scientist directions
+# concurrently on one 96GB GPU server.
+
+data_dir: "data"
+preprocess_data: False
+
+goal: null
+eval: null
+
+log_dir: logs
+workspace_dir: workspaces
+copy_data: True
+exp_name: run
+
+exec:
+  timeout: 5400
+  agent_file_name: runfile.py
+  format_tb_ipython: False
+
+generate_report: True
+report:
+  model: gpt-5.4
+  temp: 1.0
+
+experiment:
+  num_syn_datasets: 1
+
+debug:
+  stage4: False
+
+agent:
+  type: parallel
+  num_workers: 1
+  max_workers_per_gpu: 1
+  stages:
+    stage1_max_iters: 12
+    stage2_max_iters: 8
+    stage3_max_iters: 8
+    stage4_max_iters: 10
+  steps: 5
+  k_fold_validation: 1
+  multi_seed_eval:
+    num_seeds: 1
+  expose_prediction: False
+  data_preview: False
+
+  code:
+    model: gpt-5.4
+    temp: 1.0
+    max_tokens: 12000
+
+  feedback:
+    model: gpt-5.4
+    temp: 0.5
+    max_tokens: 8192
+
+  vlm_feedback:
+    model: gpt-5.4
+    temp: 0.5
+    max_tokens: null
+
+  search:
+    max_debug_depth: 2
+    debug_prob: 0.4
+    num_drafts: 1

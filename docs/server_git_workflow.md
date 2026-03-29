@@ -105,3 +105,21 @@ For paid runs:
 4. start the next longer run
 
 This keeps server loss from turning into research loss.
+
+## External Repos
+
+If you clone someone else's code and plan to modify it on a rented server, fork it
+first and push your changes to your fork instead of leaving them only on disk.
+
+Helper:
+
+```bash
+bash scripts/clone_and_prepare_fork.sh https://github.com/OWNER/REPO.git [DEST_DIR]
+```
+
+It will:
+
+- clone the upstream repo if needed
+- create a fork under `GITHUB_USER` using `GITHUB_TOKEN`
+- set `upstream` to the original repo
+- set `origin` to your fork so normal pushes go to your copy

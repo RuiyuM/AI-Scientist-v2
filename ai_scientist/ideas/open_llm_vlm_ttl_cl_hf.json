@@ -1,0 +1,66 @@
+[
+    {
+        "Name": "confidence_gated_ttl_lora",
+        "Title": "Confidence-Gated Test-Time LoRA for Open LLM and VLM Reasoning on Hugging Face Benchmarks",
+        "Short Hypothesis": "Lightweight LoRA updates should help open LLMs and VLMs on shifted Hugging Face evaluation streams only when adaptation is triggered selectively. Confidence-gated test-time learning can improve robustness while avoiding the drift and overfitting that often appear when every test example updates the model.",
+        "Related Work": "Recent work on test-time training, entropy minimization, sample-specific optimization, and lightweight adapter tuning suggests that adaptation at inference time can help under distribution shift, but the gains are unstable for large language and vision-language models. LoRA-style updates are practical for open models, yet always-on adaptation often harms calibration or accumulates errors. This proposal differs by studying the same confidence-gated adaptation rule across both text and multimodal Hugging Face tasks under a fixed compute budget, with direct comparisons against no adaptation, always-on LoRA adaptation, and reset-based baselines. The focus is not just whether test-time learning can help, but when the gate should fire, how often adaptation should be reverted, and whether the gains survive realistic stream ordering.",
+        "Abstract": "Open large language models and vision-language models are increasingly deployed on evaluation streams that differ from the data distribution seen during instruction tuning. Test-time learning is a promising response, but for modern open models it remains unclear whether lightweight online adaptation improves performance or simply introduces instability. We propose a practical study of confidence-gated test-time LoRA adaptation for open models running on Hugging Face benchmarks. The core idea is simple: the model remains frozen on easy or high-confidence examples, but small low-rank updates are activated on uncertain or shifted windows identified by entropy, answer-margin, or perplexity signals. We will compare this selective strategy against no adaptation, always-on LoRA updates, and periodic reset baselines for both text reasoning and multimodal reasoning tasks. Candidate text tasks include `allenai/ai2_arc`, `qiaojin/PubMedQA`, and subject-grouped subsets of `cais/mmlu`, while multimodal tasks include `lmms-lab/ScienceQA` and `HuggingFaceM4/ChartQA`. Candidate models include practical open families such as Qwen and Qwen2-VL in the 7B range with quantization when needed. The study emphasizes accuracy under stream shift, adaptation frequency, compute overhead, calibration changes, and failure cases. The expected outcome is a clear picture of whether selective test-time LoRA is a reliable tool or only a niche win under tightly defined conditions.",
+        "Experiments": [
+            "Implement a unified evaluation harness with frozen-base inference plus three test-time learning baselines: no adaptation, always-on LoRA adaptation, and confidence-gated LoRA adaptation with optional periodic reset.",
+            "Use an open LLM such as Qwen2.5-7B-Instruct for text tasks and an open VLM such as Qwen2-VL-7B-Instruct for multimodal tasks, using 4-bit or 8-bit loading when needed to stay within a single 96GB GPU server.",
+            "Evaluate on Hugging Face datasets including `allenai/ai2_arc`, `qiaojin/PubMedQA`, and a filtered subject stream from `cais/mmlu` for text, plus `lmms-lab/ScienceQA` and `HuggingFaceM4/ChartQA` for multimodal reasoning.",
+            "Create multiple evaluation streams with IID ordering, clustered domain ordering, and hard-example bursts to test whether gating helps more under localized shift than under random order.",
+            "Measure exact-match or accuracy, calibration proxies, adaptation trigger rate, extra wall-clock time per sample, and performance before and after reset events.",
+            "Analyze whether improvements concentrate in a small number of difficult windows or produce broad gains, and document cases where adaptation hurts final accuracy."
+        ],
+        "Risk Factors and Limitations": [
+            "Multimodal evaluation pipelines may require substantial engineering before meaningful adaptation experiments can begin.",
+            "The adaptation signal may be too noisy on multiple-choice tasks, leading to drift even with gating.",
+            "Quantization, caching, and generation settings may interact with LoRA updates and complicate fair comparisons.",
+            "The compute overhead of repeated adapter updates may erase practical benefits even when small accuracy gains exist.",
+            "A negative result is possible if confidence signals are not predictive of when adaptation is useful."
+        ]
+    },
+    {
+        "Name": "shared_low_rank_stream_adaptation",
+        "Title": "Shared Low-Rank Stream Adaptation for Continual Test-Time Learning on Hugging Face Task Sequences",
+        "Short Hypothesis": "A single shared low-rank adapter updated across a streamed sequence of related Hugging Face tasks should outperform per-sample test-time learning when shift is gradual, provided that the updates are regularized to remain close to the base model and obvious outlier batches are rejected.",
+        "Related Work": "Continual learning and test-time learning are often studied separately: continual methods usually assume repeated task exposure, while test-time adaptation often focuses on immediate per-batch gains without retaining useful structure over time. Recent adapter-based methods suggest that low-rank parameterization can make online updates cheap enough for deployment, but there is limited evidence on whether a shared online adapter helps across realistic sequences of open Hugging Face tasks. This proposal differs by explicitly comparing reset-after-task, always-carry-forward, and anchored shared-adapter strategies on text and multimodal task streams, with the goal of quantifying when memory helps and when it simply compounds errors.",
+        "Abstract": "Many realistic deployments expose open models to streams of related tasks rather than independent test examples. This raises a central question for test-time learning: should the model reset after each batch, or should it keep a memory of previous adaptation that may help on future examples? We propose to study shared low-rank stream adaptation for open LLM and VLM evaluation on Hugging Face task sequences. A frozen base model is augmented with a small adapter that can be updated online as the test stream evolves. We compare three strategies: immediate reset, naive carry-forward adaptation, and an anchored shared adapter with regularization and outlier rejection. Text sequences may include ordered streams across `allenai/ai2_arc`, `qiaojin/PubMedQA`, and subject-grouped `cais/mmlu`, while multimodal streams may include `lmms-lab/ScienceQA`, `HuggingFaceM4/ChartQA`, and document-style subsets when feasible. The study tracks stream position, forgetting, transfer, and compute cost. The goal is to determine whether a shared low-rank memory is a practical continual test-time learning mechanism or whether the safest policy remains aggressive reset. Even strong negative results would clarify the limits of online adaptation for open models under realistic compute constraints.",
+        "Experiments": [
+            "Implement a streaming evaluation loop that exposes tasks in a fixed order and records per-window performance, adaptation state, and any reset events.",
+            "Compare three online adaptation strategies: per-window reset, naive carry-forward shared adapter, and carry-forward adapter with weight anchoring plus outlier rejection.",
+            "Run text streams built from `allenai/ai2_arc`, `qiaojin/PubMedQA`, and grouped subsets of `cais/mmlu`, and run multimodal streams built from `lmms-lab/ScienceQA` and `HuggingFaceM4/ChartQA` when the VLM path is stable.",
+            "Measure transfer to the next domain, forgetting on a small replay-style probe set, total adaptation compute, and robustness to ordering changes.",
+            "Study how adapter rank, learning rate, and reset threshold affect the stability-plasticity tradeoff.",
+            "Perform failure analysis on streams where the shared adapter becomes harmful, identifying whether the issue is domain mismatch, noisy pseudo-signals, or compounding error."
+        ],
+        "Risk Factors and Limitations": [
+            "Task-sequence experiments can become expensive because every design choice interacts with ordering and reset policy.",
+            "A small probe set for measuring forgetting may bias conclusions if it is not carefully designed.",
+            "The shared adapter may mainly memorize spurious task-specific quirks instead of generalizable shift information.",
+            "Multimodal streams may be difficult to stabilize if image preprocessing or generation latency dominates the run."
+        ]
+    },
+    {
+        "Name": "cross_modal_consistency_ttl",
+        "Title": "Cross-Modal Consistency Signals for Stable Test-Time Learning in Open Vision-Language Models",
+        "Short Hypothesis": "For open vision-language models, self-supervised test-time learning based on cross-modal consistency between answer logits, generated rationales, and image-grounded captions should be more stable than plain entropy minimization on multimodal Hugging Face benchmarks.",
+        "Related Work": "Most test-time adaptation methods for large models rely on entropy-style objectives or pseudo-label confidence, which can be brittle for multimodal reasoning because the model may be confident for the wrong reason. Vision-language models also expose more latent structure: caption tokens, rationale text, and answer distributions can agree or conflict. This proposal differs by turning that agreement into a test-time learning signal and directly comparing it with simpler entropy-based adaptation on realistic Hugging Face multimodal tasks. The emphasis is on stability, not merely raw average gain, and on understanding whether cross-modal agreement can identify safe opportunities for adaptation.",
+        "Abstract": "Test-time learning for vision-language models is appealing but unstable: multimodal models can become overconfident, and naive entropy minimization may reinforce spurious image-text shortcuts. We propose a targeted study of cross-modal consistency signals for stable online adaptation in open VLMs. The idea is to update a lightweight adapter only when the model's answer distribution is supported by consistent auxiliary evidence such as generated captions, rationales, or repeated answer samples. This creates a stronger self-supervised signal than entropy alone and may reduce harmful updates on ambiguous inputs. We will evaluate open models such as Qwen2-VL on Hugging Face multimodal reasoning tasks including `lmms-lab/ScienceQA`, `HuggingFaceM4/ChartQA`, and document-style VQA data when feasible on a single 96GB GPU. Baselines include frozen inference, entropy-minimization adaptation, and confidence-gated LoRA adaptation without consistency checks. We will measure answer accuracy, stability over the stream, adaptation frequency, latency, and failure modes tied to OCR, chart parsing, or distractor-heavy images. The expected contribution is a concrete answer to whether cross-modal agreement provides a safer trigger and objective for multimodal test-time learning.",
+        "Experiments": [
+            "Build a VLM-only evaluation path around an open model such as Qwen2-VL-7B-Instruct and Hugging Face multimodal tasks including `lmms-lab/ScienceQA` and `HuggingFaceM4/ChartQA`, adding document-style VQA only if stable.",
+            "Implement four baselines: frozen inference, entropy-minimization test-time adaptation, confidence-gated LoRA adaptation, and consistency-gated adaptation using agreement between answer logits, rationale generations, and caption-like auxiliary text.",
+            "Compare adaptation on easy versus hard subsets defined by OCR load, visual clutter, or long-context reasoning needs.",
+            "Track exact-match or multiple-choice accuracy, trigger rate, latency, and instability events where performance degrades after adaptation.",
+            "Study whether consistency signals are most useful on chart and document problems where a single view of the image is not enough.",
+            "Produce qualitative examples showing when consistency gating blocks harmful updates and when it still fails."
+        ],
+        "Risk Factors and Limitations": [
+            "Generating auxiliary rationales or captions may add too much latency for a practical test-time learning loop.",
+            "Agreement between weak signals may still be wrong, so consistency is not a guarantee of correctness.",
+            "Chart and OCR-heavy benchmarks may fail because of perception bottlenecks rather than adaptation policy.",
+            "This idea may be engineering-heavy and could need simplification before a full paper-quality run."
+        ]
+    }
+]
