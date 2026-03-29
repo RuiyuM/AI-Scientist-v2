@@ -1,178 +1,178 @@
 {
   "source_experiment_dir": "experiments/2026-03-29_01-53-16_cross_modal_consistency_ttl_attempt_0",
   "snapshot_dir": "research_reports/2026-03-29_01-53-16_cross_modal_consistency_ttl_attempt_0",
-  "snapshot_time_utc": "2026-03-29T02:53:22.651122+00:00",
+  "snapshot_time_utc": "2026-03-29T03:01:00.759487+00:00",
   "file_count": 34,
   "files": [
     {
       "path": "bfts_config.yaml",
       "size_bytes": 1178,
-      "mtime_utc": "2026-03-29T02:53:22.483186+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.601220+00:00"
     },
     {
       "path": "idea.json",
       "size_bytes": 4026,
-      "mtime_utc": "2026-03-29T02:53:22.480186+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.596220+00:00"
     },
     {
       "path": "idea.md",
       "size_bytes": 3889,
-      "mtime_utc": "2026-03-29T02:53:22.474186+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.589220+00:00"
     },
     {
       "path": "manifest.json",
       "size_bytes": 7379,
-      "mtime_utc": "2026-03-29T02:50:55.303811+00:00"
+      "mtime_utc": "2026-03-29T02:53:22.650188+00:00"
     },
     {
       "path": "logs/0-run/unified_tree_viz.html",
       "size_bytes": 106637,
-      "mtime_utc": "2026-03-29T02:53:22.490187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.607220+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/best_solution_2927a70756224d6ea130fa23f8e1f8e1.py",
       "size_bytes": 13617,
-      "mtime_utc": "2026-03-29T02:53:22.522187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.640220+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/config.yaml",
       "size_bytes": 1697,
-      "mtime_utc": "2026-03-29T02:53:22.515187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.630220+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/journal.json",
       "size_bytes": 76055,
-      "mtime_utc": "2026-03-29T02:53:22.509187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.625220+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/tree_plot.html",
       "size_bytes": 106609,
-      "mtime_utc": "2026-03-29T02:53:22.517187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.635220+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/notes/stage_progress.json",
       "size_bytes": 16670,
-      "mtime_utc": "2026-03-29T02:53:22.503187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.620220+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/experiment_code.py",
       "size_bytes": 12703,
-      "mtime_utc": "2026-03-29T02:53:22.533187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.650220+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/plotting_code.py",
       "size_bytes": 8127,
-      "mtime_utc": "2026-03-29T02:53:22.527187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.645221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_adaptation_events.png",
       "size_bytes": 33465,
-      "mtime_utc": "2026-03-29T02:53:22.549187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.663221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_multimodal_accuracy_curves.png",
       "size_bytes": 30048,
-      "mtime_utc": "2026-03-29T02:53:22.558187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.669221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_multimodal_adaptation_updates.png",
       "size_bytes": 51022,
-      "mtime_utc": "2026-03-29T02:53:22.572187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.682221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_multimodal_confusion_matrix_consistency.png",
       "size_bytes": 25036,
-      "mtime_utc": "2026-03-29T02:53:22.584188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.692221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_multimodal_entropy_stream.png",
       "size_bytes": 90872,
-      "mtime_utc": "2026-03-29T02:53:22.579187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.687221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_multimodal_loss_curves.png",
       "size_bytes": 30420,
-      "mtime_utc": "2026-03-29T02:53:22.554187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.666221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_multimodal_stream_accuracy.png",
       "size_bytes": 45614,
-      "mtime_utc": "2026-03-29T02:53:22.569187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.677221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_multimodal_stream_metric_summary.png",
       "size_bytes": 41513,
-      "mtime_utc": "2026-03-29T02:53:22.563187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.673221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_stream_accuracy.png",
       "size_bytes": 48962,
-      "mtime_utc": "2026-03-29T02:53:22.544187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.659220+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d0f3ce9ce14b40f48ea3074b87a2e7b0_proc_20440/synthetic_stream_cumulative_accuracy.png",
       "size_bytes": 25349,
-      "mtime_utc": "2026-03-29T02:53:22.539187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.654221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/experiment_code.py",
       "size_bytes": 12904,
-      "mtime_utc": "2026-03-29T02:53:22.593188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.702221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/plotting_code.py",
       "size_bytes": 8127,
-      "mtime_utc": "2026-03-29T02:53:22.589188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.697221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/synthetic_adaptation_events.png",
       "size_bytes": 33465,
-      "mtime_utc": "2026-03-29T02:53:22.603188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.713221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/synthetic_multimodal_accuracy_curves.png",
       "size_bytes": 30048,
-      "mtime_utc": "2026-03-29T02:53:22.612188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.723221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/synthetic_multimodal_adaptation_updates.png",
       "size_bytes": 51022,
-      "mtime_utc": "2026-03-29T02:53:22.626188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.736221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/synthetic_multimodal_confusion_matrix_consistency.png",
       "size_bytes": 25036,
-      "mtime_utc": "2026-03-29T02:53:22.637188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.746221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/synthetic_multimodal_entropy_stream.png",
       "size_bytes": 90877,
-      "mtime_utc": "2026-03-29T02:53:22.632188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.741221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/synthetic_multimodal_loss_curves.png",
       "size_bytes": 30420,
-      "mtime_utc": "2026-03-29T02:53:22.608188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.717221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/synthetic_multimodal_stream_accuracy.png",
       "size_bytes": 45614,
-      "mtime_utc": "2026-03-29T02:53:22.622188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.731221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/synthetic_multimodal_stream_metric_summary.png",
       "size_bytes": 41513,
-      "mtime_utc": "2026-03-29T02:53:22.617188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.726221+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_bcb5cd49f3fa4404a439e7ae742e2010_proc_20440/synthetic_stream_accuracy.png",
       "size_bytes": 48962,
-      "mtime_utc": "2026-03-29T02:53:22.597188+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.707221+00:00"
     },
     {
       "path": "0-run/process_ForkProcess-1/runfile.py",
       "size_bytes": 8127,
-      "mtime_utc": "2026-03-29T02:53:22.496187+00:00"
+      "mtime_utc": "2026-03-29T03:01:00.614220+00:00"
     }
   ]
 }
