@@ -1091,20 +1091,26 @@ class MinimalAgent:
 class GPUManager:
     """Manages GPU allocation across processes"""
 
-    def __init__(self, num_gpus: int):
+    def __init__(self, num_gpus: int, max_workers_per_gpu: int = 1):
         self.num_gpus = num_gpus
-        self.available_gpus: Set[int] = set(range(num_gpus))
+        self.max_workers_per_gpu = max(1, max_workers_per_gpu)
+        self.gpu_loads: Dict[int, int] = {gpu_id: 0 for gpu_id in range(num_gpus)}
         self.gpu_assignments: Dict[str, int] = {}  # process_id -> gpu_id
 
     def acquire_gpu(self, process_id: str) -> int:
         """Assigns a GPU to a process"""
-        if not self.available_gpus:
+        available_gpus = [
+            gpu_id
+            for gpu_id, load in self.gpu_loads.items()
+            if load < self.max_workers_per_gpu
+        ]
+        if not available_gpus:
             raise RuntimeError("No GPUs available")
-        print(f"Available GPUs: {self.available_gpus}")
+        print(f"Available GPUs: {available_gpus}")
         print(f"Process ID: {process_id}")
-        gpu_id = min(self.available_gpus)
+        gpu_id = min(available_gpus, key=lambda gpu_id: (self.gpu_loads[gpu_id], gpu_id))
         print(f"Acquiring GPU {gpu_id} for process {process_id}")
-        self.available_gpus.remove(gpu_id)
+        self.gpu_loads[gpu_id] += 1
         self.gpu_assignments[process_id] = gpu_id
         print(f"GPU assignments: {self.gpu_assignments}")
         return gpu_id
@@ -1113,7 +1119,7 @@ class GPUManager:
         """Releases GPU assigned to a process"""
         if process_id in self.gpu_assignments:
             gpu_id = self.gpu_assignments[process_id]
-            self.available_gpus.add(gpu_id)
+            self.gpu_loads[gpu_id] = max(0, self.gpu_loads[gpu_id] - 1)
             del self.gpu_assignments[process_id]
 
 
@@ -1166,6 +1172,7 @@ class ParallelAgent:
         )
         self.data_preview = None
         self.num_workers = cfg.agent.num_workers
+        self.max_workers_per_gpu = max(1, getattr(cfg.agent, "max_workers_per_gpu", 1))
         self.num_gpus = get_gpu_count()
         print(f"num_gpus: {self.num_gpus}")
         if self.num_gpus == 0:
@@ -1173,11 +1180,18 @@ class ParallelAgent:
         else:
             print(f"Detected {self.num_gpus} GPUs")
 
-        self.gpu_manager = GPUManager(self.num_gpus) if self.num_gpus > 0 else None
+        self.gpu_manager = (
+            GPUManager(self.num_gpus, self.max_workers_per_gpu)
+            if self.num_gpus > 0
+            else None
+        )
 
         if self.num_gpus > 0:
-            self.num_workers = min(self.num_workers, self.num_gpus)
-            logger.info(f"Limiting workers to {self.num_workers} to match GPU count")
+            gpu_capacity = self.num_gpus * self.max_workers_per_gpu
+            self.num_workers = min(self.num_workers, gpu_capacity)
+            logger.info(
+                f"Limiting workers to {self.num_workers} to match GPU capacity {gpu_capacity}"
+            )
 
         self.timeout = self.cfg.exec.timeout
         self.executor = ProcessPoolExecutor(max_workers=self.num_workers)

@@ -69,6 +69,7 @@ class AgentConfig:
     num_workers: int
     type: str
     multi_seed_eval: dict[str, int]
+    max_workers_per_gpu: int = 1
 
     summary: Optional[StageConfig] = None
     select_node: Optional[StageConfig] = None

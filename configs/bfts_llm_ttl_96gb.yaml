@@ -33,7 +33,8 @@ debug:
 
 agent:
   type: parallel
-  num_workers: 1
+  num_workers: 3
+  max_workers_per_gpu: 3
   stages:
     stage1_max_iters: 12
     stage2_max_iters: 8
@@ -42,7 +43,7 @@ agent:
   steps: 5
   k_fold_validation: 1
   multi_seed_eval:
-    num_seeds: 1
+    num_seeds: 3
   expose_prediction: False
   data_preview: False
 
@@ -64,4 +65,4 @@ agent:
   search:
     max_debug_depth: 2
     debug_prob: 0.4
-    num_drafts: 2
+    num_drafts: 3
