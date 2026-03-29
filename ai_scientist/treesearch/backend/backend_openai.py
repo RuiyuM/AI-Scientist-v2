@@ -3,6 +3,7 @@ import logging
 import time
 
 from .utils import FunctionSpec, OutputType, opt_messages_to_list, backoff_create
+from ai_scientist.utils.openai_compat import normalize_chat_completion_kwargs
 from funcy import notnone, once, select_values
 import openai
 from rich import print
@@ -46,6 +47,9 @@ def query(
 
     if filtered_kwargs.get("model", "").startswith("ollama/"):
        filtered_kwargs["model"] = filtered_kwargs["model"].replace("ollama/", "")
+    filtered_kwargs = normalize_chat_completion_kwargs(
+        filtered_kwargs.get("model"), filtered_kwargs
+    )
 
     t0 = time.time()
     completion = backoff_create(

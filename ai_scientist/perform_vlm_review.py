@@ -3,6 +3,7 @@ import hashlib
 import pymupdf
 import re
 import base64
+from ai_scientist.utils.openai_compat import chat_completion_create
 from ai_scientist.vlm import (
     get_response_from_vlm,
     get_batch_responses_from_vlm,
@@ -427,11 +428,12 @@ def detect_duplicate_figures(client, client_model, pdf_path):
                     "url": f"data:image/jpeg;base64,{encode_image_to_base64(img_info['images'][0])}"
                 },
             }
-        )
+    )
 
     try:
-        response = client.chat.completions.create(
-            model=client_model,
+        response = chat_completion_create(
+            client,
+            client_model,
             messages=messages,
             max_tokens=1000,
         )

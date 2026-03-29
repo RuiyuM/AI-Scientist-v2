@@ -105,7 +105,7 @@ Before running the full AI Scientist-v2 experiment pipeline, you first use the `
     ```bash
     python ai_scientist/perform_ideation_temp_free.py \
      --workshop-file "ai_scientist/ideas/my_research_topic.md" \
-     --model gpt-4o-2024-05-13 \
+     --model gpt-5.4 \
      --max-num-generations 20 \
      --num-reflections 5
     ```
@@ -138,17 +138,17 @@ Key tree search configuration parameters in `bfts_config.yaml`:
     -   `debug_prob`: The probability of attempting to debug a failing node.
     -   `num_drafts`: The number of initial root nodes (i.e., the number of independent trees to grow) during Stage 1.
 
-Example command to run AI-Scientist-v2 using a generated idea file (e.g., `my_research_topic.json`). Please review `bfts_config.yaml` for detailed tree search parameters (the default config includes `claude-3-5-sonnet` for experiments). Do not set `load_code` if you do not want to initialize experimentation with a code snippet.
+Example command to run AI-Scientist-v2 using a generated idea file (e.g., `my_research_topic.json`). Please review `bfts_config.yaml` for detailed tree search parameters. In this fork, the default config uses `gpt-5.4` for ideation, experiment management, writeup, and review. Do not set `load_code` if you do not want to initialize experimentation with a code snippet.
 
 ```bash
 python launch_scientist_bfts.py \
  --load_ideas "ai_scientist/ideas/my_research_topic.json" \
  --load_code \
  --add_dataset_ref \
- --model_writeup o1-preview-2024-09-12 \
- --model_citation gpt-4o-2024-11-20 \
- --model_review gpt-4o-2024-11-20 \
- --model_agg_plots o3-mini-2025-01-31 \
+ --model_writeup gpt-5.4 \
+ --model_citation gpt-5.4 \
+ --model_review gpt-5.4 \
+ --model_agg_plots gpt-5.4 \
  --num_cite_rounds 20
 ```
 

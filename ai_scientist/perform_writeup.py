@@ -456,8 +456,8 @@ def perform_writeup(
     base_folder,
     no_writing=False,
     num_cite_rounds=20,
-    small_model="gpt-4o-2024-05-13",
-    big_model="o1-2024-12-17",
+    small_model="gpt-5.4",
+    big_model="gpt-5.4",
     n_writeup_reflections=3,
     page_limit=8,
 ):
@@ -768,14 +768,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
+        default="gpt-5.4",
         choices=AVAILABLE_LLMS,
         help="Model to use for citation collection (small model).",
     )
     parser.add_argument(
         "--big-model",
         type=str,
-        default="o1-2024-12-17",
+        default="gpt-5.4",
         choices=AVAILABLE_LLMS,
         help="Model to use for final writeup (big model).",
     )

@@ -23,9 +23,6 @@ echo "Mode: $MODE"
 case "$MODE" in
   default)
     check_key OPENAI_API_KEY
-    check_key AWS_ACCESS_KEY_ID
-    check_key AWS_SECRET_ACCESS_KEY
-    check_key AWS_REGION_NAME
     if [[ -n "${S2_API_KEY:-}" ]]; then
       echo "[ok] S2_API_KEY"
     else

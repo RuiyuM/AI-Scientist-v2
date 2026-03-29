@@ -23,6 +23,11 @@ class TokenTracker:
         self.interactions = defaultdict(list)
 
         self.MODEL_PRICES = {
+            "gpt-5.4": {
+                "prompt": 2.5 / 1000000,  # $2.50 per 1M tokens
+                "cached": 0.25 / 1000000,  # $0.25 per 1M cached tokens
+                "completion": 15 / 1000000,  # $15.00 per 1M tokens
+            },
             "gpt-4o-2024-11-20": {
                 "prompt": 2.5 / 1000000,  # $2.50 per 1M tokens
                 "cached": 1.25 / 1000000,  # $1.25 per 1M tokens
@@ -106,11 +111,15 @@ class TokenTracker:
 
     def calculate_cost(self, model: str) -> float:
         """Calculate the cost for a specific model based on token usage."""
-        if model not in self.MODEL_PRICES:
+        pricing_model = model
+        if pricing_model not in self.MODEL_PRICES and pricing_model.startswith("gpt-5.4"):
+            pricing_model = "gpt-5.4"
+
+        if pricing_model not in self.MODEL_PRICES:
             logging.warning(f"Price information not available for model {model}")
             return 0.0
 
-        prices = self.MODEL_PRICES[model]
+        prices = self.MODEL_PRICES[pricing_model]
         tokens = self.token_counts[model]
 
         # Calculate cost for prompt and completion tokens

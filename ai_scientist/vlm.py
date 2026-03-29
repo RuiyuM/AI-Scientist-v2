@@ -7,10 +7,12 @@ import openai
 import os
 from PIL import Image
 from ai_scientist.utils.token_tracker import track_token_usage
+from ai_scientist.utils.openai_compat import chat_completion_create
 
 MAX_NUM_TOKENS = 4096
 
 AVAILABLE_VLMS = [
+    "gpt-5.4",
     "gpt-4o-2024-05-13",
     "gpt-4o-2024-08-06",
     "gpt-4o-2024-11-20",
@@ -52,8 +54,9 @@ def encode_image_to_base64(image_path: str) -> str:
 @track_token_usage
 def make_llm_call(client, model, temperature, system_message, prompt):
     if model.startswith("ollama/"):
-        return client.chat.completions.create(
-            model=model.replace("ollama/", ""),
+        return chat_completion_create(
+            client,
+            model.replace("ollama/", ""),
             messages=[
                 {"role": "system", "content": system_message},
                 *prompt,
@@ -65,8 +68,9 @@ def make_llm_call(client, model, temperature, system_message, prompt):
             seed=0,
         )
     elif "gpt" in model:
-        return client.chat.completions.create(
-            model=model,
+        return chat_completion_create(
+            client,
+            model,
             messages=[
                 {"role": "system", "content": system_message},
                 *prompt,
@@ -95,8 +99,9 @@ def make_llm_call(client, model, temperature, system_message, prompt):
 @track_token_usage
 def make_vlm_call(client, model, temperature, system_message, prompt):
     if model.startswith("ollama/"):
-        return client.chat.completions.create(
-            model=model.replace("ollama/", ""),
+        return chat_completion_create(
+            client,
+            model.replace("ollama/", ""),
             messages=[
                 {"role": "system", "content": system_message},
                 *prompt,
@@ -105,8 +110,9 @@ def make_vlm_call(client, model, temperature, system_message, prompt):
             max_tokens=MAX_NUM_TOKENS,
         )
     elif "gpt" in model:
-        return client.chat.completions.create(
-            model=model,
+        return chat_completion_create(
+            client,
+            model,
             messages=[
                 {"role": "system", "content": system_message},
                 *prompt,
@@ -195,6 +201,7 @@ def get_response_from_vlm(
 def create_client(model: str) -> tuple[Any, str]:
     """Create client for vision-language model."""
     if model in [
+        "gpt-5.4",
         "gpt-4o-2024-05-13",
         "gpt-4o-2024-08-06",
         "gpt-4o-2024-11-20",
@@ -302,8 +309,9 @@ def get_batch_responses_from_vlm(
         new_msg_history = msg_history + [{"role": "user", "content": content}]
 
         if model.startswith("ollama/"):
-            response = client.chat.completions.create(
-                model=model.replace("ollama/", ""),
+            response = chat_completion_create(
+                client,
+                model.replace("ollama/", ""),
                 messages=[
                     {"role": "system", "content": system_message},
                     *new_msg_history,
@@ -315,8 +323,9 @@ def get_batch_responses_from_vlm(
             )
         else:
             # Get multiple responses
-            response = client.chat.completions.create(
-                model=model,
+            response = chat_completion_create(
+                client,
+                model,
                 messages=[
                     {"role": "system", "content": system_message},
                     *new_msg_history,

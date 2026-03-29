@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 . "${SCRIPT_DIR}/load_api_env.sh"
 
 TOPIC_FILE="${1:-ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.md}"
-MODEL="${2:-gpt-4o-2024-05-13}"
+MODEL="${2:-gpt-5.4}"
 MAX_NUM_GENERATIONS="${3:-20}"
 NUM_REFLECTIONS="${4:-5}"
 

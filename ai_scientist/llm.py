@@ -7,6 +7,7 @@ from ai_scientist.utils.token_tracker import track_token_usage
 import anthropic
 import backoff
 import openai
+from ai_scientist.utils.openai_compat import chat_completion_create
 
 MAX_NUM_TOKENS = 4096
 
@@ -23,6 +24,7 @@ AVAILABLE_LLMS = [
     "gpt-4.1-2025-04-14",
     "gpt-4.1-mini",
     "gpt-4.1-mini-2025-04-14",
+    "gpt-5.4",
     "o1",
     "o1-2024-12-17",
     "o1-preview-2024-09-12",
@@ -100,8 +102,9 @@ def get_batch_responses_from_llm(
 
     if model.startswith("ollama/"):
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model=model.replace("ollama/", ""),
+        response = chat_completion_create(
+            client,
+            model.replace("ollama/", ""),
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,
@@ -117,8 +120,9 @@ def get_batch_responses_from_llm(
         ]
     elif "gpt" in model:
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model=model,
+        response = chat_completion_create(
+            client,
+            model,
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,
@@ -135,8 +139,9 @@ def get_batch_responses_from_llm(
         ]
     elif model == "deepseek-coder-v2-0724":
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model="deepseek-coder",
+        response = chat_completion_create(
+            client,
+            "deepseek-coder",
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,
@@ -152,8 +157,9 @@ def get_batch_responses_from_llm(
         ]
     elif model == "llama-3-1-405b-instruct":
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model="meta-llama/llama-3.1-405b-instruct",
+        response = chat_completion_create(
+            client,
+            "meta-llama/llama-3.1-405b-instruct",
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,
@@ -169,8 +175,9 @@ def get_batch_responses_from_llm(
         ]
     elif 'gemini' in model:
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model=model,
+        response = chat_completion_create(
+            client,
+            model,
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,
@@ -215,8 +222,9 @@ def get_batch_responses_from_llm(
 @track_token_usage
 def make_llm_call(client, model, temperature, system_message, prompt):
     if model.startswith("ollama/"):
-        return client.chat.completions.create(
-            model=model.replace("ollama/", ""),
+        return chat_completion_create(
+            client,
+            model.replace("ollama/", ""),
             messages=[
                 {"role": "system", "content": system_message},
                 *prompt,
@@ -227,8 +235,9 @@ def make_llm_call(client, model, temperature, system_message, prompt):
             stop=None,
         )
     elif "gpt" in model:
-        return client.chat.completions.create(
-            model=model,
+        return chat_completion_create(
+            client,
+            model,
             messages=[
                 {"role": "system", "content": system_message},
                 *prompt,
@@ -311,8 +320,9 @@ def get_response_from_llm(
         ]
     elif model.startswith("ollama/"):
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model=model.replace("ollama/", ""),
+        response = chat_completion_create(
+            client,
+            model.replace("ollama/", ""),
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,
@@ -348,8 +358,9 @@ def get_response_from_llm(
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     elif model == "deepseek-coder-v2-0724":
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model="deepseek-coder",
+        response = chat_completion_create(
+            client,
+            "deepseek-coder",
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,
@@ -364,8 +375,9 @@ def get_response_from_llm(
     elif model == "deepcoder-14b":
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
         try:
-            response = client.chat.completions.create(
-                model="agentica-org/DeepCoder-14B-Preview",
+            response = chat_completion_create(
+                client,
+                "agentica-org/DeepCoder-14B-Preview",
                 messages=[
                     {"role": "system", "content": system_message},
                     *new_msg_history,
@@ -407,8 +419,9 @@ def get_response_from_llm(
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     elif model in ["meta-llama/llama-3.1-405b-instruct", "llama-3-1-405b-instruct"]:
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model="meta-llama/llama-3.1-405b-instruct",
+        response = chat_completion_create(
+            client,
+            "meta-llama/llama-3.1-405b-instruct",
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,
@@ -422,8 +435,9 @@ def get_response_from_llm(
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     elif 'gemini' in model:
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
-            model=model,
+        response = chat_completion_create(
+            client,
+            model,
             messages=[
                 {"role": "system", "content": system_message},
                 *new_msg_history,

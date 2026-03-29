@@ -12,12 +12,12 @@ The default launch scripts load both automatically.
 For the current default configs in this repo, the minimum useful key set is:
 
 - `OPENAI_API_KEY`
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION_NAME`
 
 Optional but useful:
 
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION_NAME`
 - `S2_API_KEY`
 - `GEMINI_API_KEY`
 - `OPENROUTER_API_KEY`
@@ -26,9 +26,9 @@ Optional but useful:
 
 Reason:
 
-- ideation defaults to OpenAI
-- the current BFTS config uses Claude on Bedrock for experiment/code generation
-- writeup and review defaults still use OpenAI
+- ideation defaults to `gpt-5.4`
+- the current BFTS configs now default to `gpt-5.4` for experiment/code generation
+- writeup and review defaults also use `gpt-5.4`
 
 ## One-Time Setup On macOS
 
@@ -91,7 +91,7 @@ bash scripts/run_open_pipeline.sh
 ## Current Defaults
 
 - topic file: `ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.md`
-- ideation model: `gpt-4o-2024-05-13`
+- ideation model: `gpt-5.4`
 - pipeline config: `configs/bfts_llm_ttl_96gb.yaml`
 - first idea index: `0`
 

@@ -2,7 +2,7 @@
 # Use with:
 #   python launch_scientist_bfts.py --config configs/bfts_llm_ttl_96gb.yaml ...
 #
-# The code-writing model can still be changed per your available provider.
+# Defaulted to GPT-5.4 so the one-click flow only needs an OpenAI API key.
 
 data_dir: "data"
 preprocess_data: False
@@ -22,7 +22,7 @@ exec:
 
 generate_report: True
 report:
-  model: gpt-4o-2024-11-20
+  model: gpt-5.4
   temp: 1.0
 
 experiment:
@@ -47,17 +47,17 @@ agent:
   data_preview: False
 
   code:
-    model: anthropic.claude-3-5-sonnet-20241022-v2:0
+    model: gpt-5.4
     temp: 1.0
     max_tokens: 12000
 
   feedback:
-    model: gpt-4o-2024-11-20
+    model: gpt-5.4
     temp: 0.5
     max_tokens: 8192
 
   vlm_feedback:
-    model: gpt-4o-2024-11-20
+    model: gpt-5.4
     temp: 0.5
     max_tokens: null
 

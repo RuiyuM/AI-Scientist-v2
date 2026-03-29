@@ -27,10 +27,10 @@ prompt_and_store() {
 }
 
 echo "This will store selected API keys in the macOS keychain."
-prompt_and_store OPENAI_API_KEY "OPENAI_API_KEY (default writeup/review/ideation path)"
-prompt_and_store AWS_ACCESS_KEY_ID "AWS_ACCESS_KEY_ID (Bedrock)"
-prompt_and_store AWS_SECRET_ACCESS_KEY "AWS_SECRET_ACCESS_KEY (Bedrock)"
-prompt_and_store AWS_REGION_NAME "AWS_REGION_NAME (Bedrock)"
+prompt_and_store OPENAI_API_KEY "OPENAI_API_KEY (default GPT-5.4 pipeline)"
+prompt_and_store AWS_ACCESS_KEY_ID "AWS_ACCESS_KEY_ID (optional Bedrock)"
+prompt_and_store AWS_SECRET_ACCESS_KEY "AWS_SECRET_ACCESS_KEY (optional Bedrock)"
+prompt_and_store AWS_REGION_NAME "AWS_REGION_NAME (optional Bedrock)"
 prompt_and_store S2_API_KEY "S2_API_KEY (optional Semantic Scholar)"
 prompt_and_store GEMINI_API_KEY "GEMINI_API_KEY (optional Gemini path)"
 prompt_and_store OPENROUTER_API_KEY "OPENROUTER_API_KEY (optional)"

@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 TOPIC_FILE="${1:-ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.md}"
-MODEL="${2:-gpt-4o-2024-05-13}"
+MODEL="${2:-gpt-5.4}"
 MAX_NUM_GENERATIONS="${3:-20}"
 NUM_REFLECTIONS="${4:-5}"
 CONFIG_PATH="${5:-configs/bfts_llm_ttl_96gb.yaml}"
