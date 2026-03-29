@@ -1,0 +1,22 @@
+{
+  "timestamp_utc": "2026-03-29T00:59:57.882422+00:00",
+  "run_label": "smoke",
+  "gpu_count": 1,
+  "max_utilization_gpu_pct": 0,
+  "max_memory_used_mb": 2,
+  "idle_threshold_util_pct": 5,
+  "idle_threshold_mem_mb": 1024,
+  "idle_now": true,
+  "scientist_process_running": false,
+  "scientist_processes": [],
+  "compute_processes": [],
+  "gpus": [
+    {
+      "index": 0,
+      "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "utilization_gpu_pct": 0,
+      "memory_used_mb": 2,
+      "memory_total_mb": 97887
+    }
+  ]
+}

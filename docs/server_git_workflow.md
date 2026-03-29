@@ -27,6 +27,14 @@ The working rule is simple:
 
 The repo already ignores the main heavy directories such as `experiments/`, `data/`, `cache/`, and `huggingface/`.
 
+Lightweight synced experiment reports should go under `research_reports/`.
+That directory is intended for:
+
+- final PDFs
+- review text and compact JSON summaries
+- token usage summaries
+- monitor alerts and lightweight status snapshots
+
 ## Autosave Helper
 
 Use the helper script from the repo root:
@@ -60,6 +68,31 @@ export GITHUB_TOKEN="your_token"
 ```
 
 Then the helper scripts can use an askpass shim instead of interactive login.
+
+## GPU Watchdog
+
+For rented servers, the default `scripts/run_scientist.sh` flow now starts a background GPU watchdog.
+
+- sample interval defaults to 10 minutes
+- if GPU usage is idle or the scientist process disappears, it snapshots `experiments/` into `research_reports/`
+- after snapshotting it triggers an autosave push
+
+Useful commands:
+
+```bash
+bash scripts/start_gpu_watchdog.sh .
+bash scripts/stop_gpu_watchdog.sh .
+bash scripts/snapshot_experiment_reports.sh
+```
+
+Useful env knobs in `.env.local`:
+
+```bash
+GPU_WATCHDOG_INTERVAL_SEC=600
+GPU_IDLE_UTIL_THRESHOLD=5
+GPU_IDLE_MEM_THRESHOLD_MB=1024
+GPU_ALERT_COOLDOWN_SEC=3600
+```
 
 ## Suggested Habit
 

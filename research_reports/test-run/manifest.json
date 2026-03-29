@@ -1,0 +1,33 @@
+{
+  "source_experiment_dir": "experiments/test-run",
+  "snapshot_dir": "research_reports/test-run",
+  "snapshot_time_utc": "2026-03-29T00:59:57.937117+00:00",
+  "file_count": 5,
+  "files": [
+    {
+      "path": "idea.json",
+      "size_bytes": 12,
+      "mtime_utc": "2026-03-29T00:59:57.919621+00:00"
+    },
+    {
+      "path": "idea.md",
+      "size_bytes": 7,
+      "mtime_utc": "2026-03-29T00:59:57.917621+00:00"
+    },
+    {
+      "path": "manifest.json",
+      "size_bytes": 692,
+      "mtime_utc": "2026-03-29T00:59:57.804620+00:00"
+    },
+    {
+      "path": "review_text.txt",
+      "size_bytes": 7,
+      "mtime_utc": "2026-03-29T00:59:57.921621+00:00"
+    },
+    {
+      "path": "logs/0-run/unified_tree_viz.html",
+      "size_bytes": 14,
+      "mtime_utc": "2026-03-29T00:59:57.926621+00:00"
+    }
+  ]
+}
