@@ -42,6 +42,12 @@ def save_token_tracker(idea_dir):
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run AI scientist experiments")
     parser.add_argument(
+        "--config",
+        type=str,
+        default="bfts_config.yaml",
+        help="Path to the base BFTS config file to copy into the experiment directory",
+    )
+    parser.add_argument(
         "--writeup-type",
         type=str,
         default="icbinb",
@@ -246,7 +252,7 @@ if __name__ == "__main__":
     with open(idea_path_json, "w") as f:
         json.dump(ideas[args.idea_idx], f, indent=4)
 
-    config_path = "bfts_config.yaml"
+    config_path = args.config
     idea_config_path = edit_bfts_config_file(
         config_path,
         idea_dir,

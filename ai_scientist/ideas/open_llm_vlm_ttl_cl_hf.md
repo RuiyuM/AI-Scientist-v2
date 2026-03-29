@@ -1,0 +1,10 @@
+# Title: Open Research on Test-Time Learning and Continual Learning for LLMs and VLMs on Hugging Face Tasks
+
+## Keywords
+large language models, vision language models, test-time learning, test-time adaptation, continual learning, LoRA, Hugging Face, open research
+
+## TL;DR
+Explore open research questions for LLMs and VLMs around test-time learning and continual learning, using tasks that can be directly downloaded from Hugging Face and run reproducibly on a single rented GPU server.
+
+## Abstract
+We want to explore open-ended research directions for large language models and vision-language models, with a primary focus on test-time learning and continual learning under realistic compute constraints. The project should not assume a single fixed method in advance. Instead, it should search for promising, well-scoped directions within a broad space that includes unlabeled test-time adaptation, sample-specific optimization, lightweight LoRA updates, shared low-rank continual adaptation, and hybrid strategies that balance fast adaptation with stability. All candidate tasks should be directly downloadable from Hugging Face and should be practical for reproduction on a single server. Candidate LLM tasks may include `cais/mmlu`, `allenai/ai2_arc`, `qiaojin/PubMedQA`, and `openai/gsm8k`. Candidate VLM tasks may include `lmms-lab/ScienceQA`, `HuggingFaceM4/ChartQA`, `facebook/textvqa`, and `pixparse/docvqa-single-page-questions`. Candidate models should be open and practical for a 96GB GPU, with preference for text and multimodal model families that are well-supported in the Hugging Face ecosystem. The main goal is to identify paper-worthy research questions rather than to force a predetermined pipeline. Useful outputs include strong negative results, comparisons between adaptation mechanisms, stability analyses, compute-efficiency analyses, and evidence about when test-time or continual adaptation helps or hurts. The final paper direction can be narrow, but the ideation stage should remain broad and should explicitly consider both LLM and VLM settings.

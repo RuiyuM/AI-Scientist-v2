@@ -187,6 +187,7 @@ experiments/
 aisci_outputs/
 slurm_logs/
 .out
+.runtime/
 
 # final papers
 final_papers/
