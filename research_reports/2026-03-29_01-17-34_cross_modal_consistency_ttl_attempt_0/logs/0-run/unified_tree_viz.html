@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Check if we're running under Live Server
+      if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+          let lastModified = '';
+
+          // Check for file changes every second
+          setInterval(async () => {
+              try {
+                  const response = await fetch(window.location.href, { method: 'HEAD' });
+                  // get a timestamp that shows when the file was last changed
+                  const currentModified = response.headers.get('last-modified');
+
+                  if (lastModified && lastModified !== currentModified) {
+                      window.location.reload();
+                  }
+
+                  lastModified = currentModified;
+              } catch (e) {
+                  console.error('Error checking for updates:', e);
+              }
+          }, 1000);
+      }
+  </script>
+    <script
+      id="p5scripttag"
+      src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"
+      integrity="sha512-uaz5GpnQoE6t5echKlX8P52czvsIGgLPcvlzfvRubLZ1Hp8JemUDnbUiAahbVtPb+jUVrNETuXvAhDDF/N3M4w=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+
+    <script>
+      const bgCol = "#FFFFFF";
+const accentCol = "#1a439e";
+
+hljs.initHighlightingOnLoad();
+
+// Function to update background color globally
+function updateBackgroundColor(color) {
+  // Update the JS variable
+  window.bgColCurrent = color;
+
+  // Update body background
+  document.body.style.backgroundColor = color;
+
+  // Update canvas container background
+  const canvasContainer = document.getElementById('canvas-container');
+  if (canvasContainer) {
+    canvasContainer.style.backgroundColor = color;
+  }
+}
+
+// Store tree data for each stage
+const stageData = {
+  Stage_1: null,
+  Stage_2: null,
+  Stage_3: null,
+  Stage_4: null
+};
+
+// Keep track of current selected stage
+let currentStage = null;
+let currentSketch = null;
+let availableStages = [];
+
+// Class definitions for nodes and edges
+class Node {
+  constructor(x, y, id, isRoot = false) {
+    this.x = x;
+    this.y = y;
+    this.id = id;
+    this.visible = isRoot; // Only root nodes are visible initially
+    this.appearProgress = 0;
+    this.popEffect = 0;
+    this.selected = false;
+    this.isRootNode = isRoot;
+  }
+
+  update() {
+    if (this.visible) {
+      // Handle the main appearance animation
+      if (this.appearProgress < 1) {
+        this.appearProgress += 0.06;
+
+        // When we reach full size, trigger the pop effect
+        if (this.appearProgress >= 1) {
+          this.appearProgress = 1; // Cap at 1
+          this.popEffect = 1; // Start the pop effect
+        }
+      }
+
+      // Handle the pop effect animation
+      if (this.popEffect > 0) {
+        this.popEffect -= 0.15; // Control how quickly it shrinks back
+        if (this.popEffect < 0) this.popEffect = 0; // Don't go negative
+      }
+    }
+  }
+
+  startAnimation() {
+    this.visible = true;
+  }
+
+  color() {
+    if (this.selected) {
+      return accentCol; // Use the global accent color variable for selected node
+    }
+    return '#4263eb'; // Default blue color
+  }
+
+  render(p5) {
+    if (this.visible) {
+      const popBonus = this.popEffect * 0.1;
+      const nodeScale = p5.map(this.appearProgress, 0, 1, 0, 1) + popBonus;
+      const alpha = p5.map(this.appearProgress, 0, 1, 0, 255);
+
+      p5.push();
+      p5.translate(this.x, this.y);
+
+      // Shadow effect
+      p5.noStroke();
+      p5.rectMode(p5.CENTER);
+
+      for (let i = 1; i <= 4; i++) {
+        p5.fill(0, 0, 0, alpha * 0.06);
+        p5.rect(i, i, 30 * nodeScale, 30 * nodeScale, 10);
+      }
+
+      // Main square - use node's color with alpha
+      let nodeColor = p5.color(this.color());
+      nodeColor.setAlpha(alpha);
+      p5.fill(nodeColor);
+      p5.rect(0, 0, 30 * nodeScale, 30 * nodeScale, 10);
+
+      // Draw checkmark icon if the node is selected
+      if (this.selected && this.appearProgress >= 1) {
+        p5.stroke(255);
+        p5.strokeWeight(2 * nodeScale);
+        p5.noFill();
+        // Draw checkmark
+        p5.beginShape();
+        p5.vertex(-8, 0);
+        p5.vertex(-3, 5);
+        p5.vertex(8, -6);
+        p5.endShape();
+      }
+
+      p5.pop();
+    }
+  }
+
+  isMouseOver(p5) {
+    return this.visible &&
+           p5.mouseX > this.x - 15 &&
+           p5.mouseX < this.x + 15 &&
+           p5.mouseY > this.y - 15 &&
+           p5.mouseY < this.y + 15;
+  }
+
+  // Connect this node to a child node
+  child(childNode) {
+    // Create an edge from this node to the child
+    let isLeft = childNode.x < this.x;
+    let isRight = childNode.x > this.x;
+    let edge = new Edge(this, childNode, isLeft, isRight);
+    return edge;
+  }
+}
+
+class Edge {
+  constructor(parent, child, isLeft, isRight) {
+    this.parent = parent;
+    this.child = child;
+    this.isLeft = isLeft;
+    this.isRight = isRight;
+    this.progress = 0;
+
+    // Calculate the midpoint where branching occurs
+    this.midY = parent.y + (child.y - parent.y) * 0.6;
+
+    // Use the actual child x-coordinate
+    // This ensures the edge will connect directly to the child node
+    this.branchX = child.x;
+  }
+
+  update() {
+    if (this.parent.visible && this.progress < 1) {
+      this.progress += 0.01; // Adjust animation speed
+    }
+    if (this.progress >= 1) {
+      this.child.visible = true;
+    }
+  }
+
+  color() {
+    return this.child.color();
+  }
+
+  render(p5) {
+    if (!this.parent.visible) return;
+
+    // Calculate path lengths
+    const verticalDist1 = this.midY - this.parent.y;
+    const horizontalDist = Math.abs(this.branchX - this.parent.x);
+    const verticalDist2 = this.child.y - this.midY;
+    const totalLength = verticalDist1 + horizontalDist + verticalDist2;
+
+    // Calculate how much of each segment to draw
+    const currentLength = totalLength * this.progress;
+
+    p5.stroke(180, 190, 205);
+    p5.strokeWeight(1.5);
+    p5.noFill();
+
+    // Always draw the first vertical segment from parent
+    if (currentLength > 0) {
+      const firstSegmentLength = Math.min(currentLength, verticalDist1);
+      const currentMidY = p5.lerp(this.parent.y, this.midY, firstSegmentLength / verticalDist1);
+      p5.line(this.parent.x, this.parent.y, this.parent.x, currentMidY);
+    }
+
+    if (currentLength > verticalDist1) {
+      // Draw second segment (horizontal)
+      const secondSegmentLength = Math.min(currentLength - verticalDist1, horizontalDist);
+      const currentBranchX = p5.lerp(this.parent.x, this.branchX, secondSegmentLength / horizontalDist);
+      p5.line(this.parent.x, this.midY, currentBranchX, this.midY);
+
+      if (currentLength > verticalDist1 + horizontalDist) {
+        // Draw third segment (vertical to child)
+        const thirdSegmentLength = currentLength - verticalDist1 - horizontalDist;
+        const currentChildY = p5.lerp(this.midY, this.child.y, thirdSegmentLength / verticalDist2);
+        p5.line(this.branchX, this.midY, this.branchX, currentChildY);
+      }
+    }
+  }
+}
+
+// Create a modified sketch for each stage
+function createTreeSketch(stageId) {
+  return function(p5) {
+    let nodes = [];
+    let edges = [];
+    let treeData = stageData[stageId];
+
+    p5.setup = function() {
+      const canvas = p5.createCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+      canvas.parent('canvas-container');
+      p5.smooth();
+      p5.frameRate(60);
+
+      if (treeData) {
+        createTreeFromData(treeData);
+      }
+    };
+
+    p5.windowResized = function() {
+      p5.resizeCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+    };
+
+    function createTreeFromData(data) {
+      // Clear existing nodes and edges
+      nodes = [];
+      edges = [];
+
+      // Add defensive checks to prevent errors
+      if (!data || !data.layout || !Array.isArray(data.layout) || !data.edges || !Array.isArray(data.edges)) {
+        console.error("Invalid tree data format:", data);
+        return; // Exit if data structure is invalid
+      }
+
+      // Find all parent nodes in edges
+      const parentNodes = new Set();
+      for (const [parentId, childId] of data.edges) {
+        parentNodes.add(parentId);
+      }
+
+      // Create nodes
+      for (let i = 0; i < data.layout.length; i++) {
+        const [nx, ny] = data.layout[i];
+        // A node is a root if it's a parent and not a child in any edge
+        const isRoot = parentNodes.has(i) && data.edges.every(edge => edge[1] !== i);
+
+        const node = new Node(
+          nx * p5.width * 0.8 + p5.width * 0.1,
+          ny * p5.height * 0.8 + p5.height * 0.1,
+          i,
+          isRoot
+        );
+        nodes.push(node);
+      }
+
+      // If no root was found, make the first parent node visible
+      if (!nodes.some(node => node.visible) && parentNodes.size > 0) {
+        // Get the first parent node
+        const firstParentId = [...parentNodes][0];
+        if (nodes[firstParentId]) {
+          nodes[firstParentId].visible = true;
+        }
+      }
+
+      // Create edges
+      for (const [parentId, childId] of data.edges) {
+        const parent = nodes[parentId];
+        const child = nodes[childId];
+        if (parent && child) { // Verify both nodes exist
+          const isLeft = child.x < parent.x;
+          const isRight = child.x > parent.x;
+          edges.push(new Edge(parent, child, isLeft, isRight));
+        }
+      }
+
+      // Select the first node by default
+      if (nodes.length > 0) {
+        nodes[0].selected = true;
+        updateNodeInfo(0);
+      }
+    }
+
+    p5.draw = function() {
+      // Use the global background color if available, otherwise use the default bgCol
+      const currentBgColor = window.bgColCurrent || bgCol;
+      p5.background(currentBgColor);
+
+      // Update and render edges
+      for (const edge of edges) {
+        edge.update();
+        edge.render(p5);
+      }
+
+      // Update and render nodes
+      for (const node of nodes) {
+        node.update();
+        node.render(p5);
+      }
+
+      // Handle mouse hover
+      p5.cursor(p5.ARROW);
+      for (const node of nodes) {
+        if (node.isMouseOver(p5)) {
+          p5.cursor(p5.HAND);
+        }
+      }
+    };
+
+    p5.mousePressed = function() {
+      // Check if any node was clicked
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].visible && nodes[i].isMouseOver(p5)) {
+          // Deselect all nodes
+          nodes.forEach(n => n.selected = false);
+          // Select the clicked node
+          nodes[i].selected = true;
+          // Update the right panel with node info
+          updateNodeInfo(i);
+          break;
+        }
+      }
+    };
+
+    function updateNodeInfo(nodeIndex) {
+      if (treeData) {
+        setNodeInfo(
+          treeData.code[nodeIndex],
+          treeData.plan[nodeIndex],
+          treeData.plot_code?.[nodeIndex],
+          treeData.plot_plan?.[nodeIndex],
+          treeData.metrics?.[nodeIndex],
+          treeData.exc_type?.[nodeIndex] || '',
+          treeData.exc_info?.[nodeIndex]?.args?.[0] || '',
+          treeData.exc_stack?.[nodeIndex] || [],
+          treeData.plots?.[nodeIndex] || [],
+          treeData.plot_analyses?.[nodeIndex] || [],
+          treeData.vlm_feedback_summary?.[nodeIndex] || '',
+          treeData.datasets_successfully_tested?.[nodeIndex] || [],
+          treeData.exec_time_feedback?.[nodeIndex] || '',
+          treeData.exec_time?.[nodeIndex] || ''
+        );
+      }
+    }
+  };
+}
+
+// Start a new p5 sketch for the given stage
+function startSketch(stageId) {
+  if (currentSketch) {
+    currentSketch.remove();
+  }
+
+  if (stageData[stageId]) {
+    currentSketch = new p5(createTreeSketch(stageId));
+
+    // Update stage info
+    const stageNumber = stageId.split('_')[1];
+    let stageDesc = '';
+    switch(stageId) {
+      case 'Stage_1': stageDesc = 'Preliminary Investigation'; break;
+      case 'Stage_2': stageDesc = 'Baseline Tuning'; break;
+      case 'Stage_3': stageDesc = 'Research Agenda Execution'; break;
+      case 'Stage_4': stageDesc = 'Ablation Studies'; break;
+    }
+
+    document.getElementById('stage-info').innerHTML =
+      `<strong>Current Stage: ${stageNumber} - ${stageDesc}</strong>`;
+  }
+}
+
+// Handle tab selection
+function selectStage(stageId) {
+  if (!stageData[stageId] || !availableStages.includes(stageId)) {
+    return; // Don't allow selection of unavailable stages
+  }
+
+  // Update active tab styles
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  document.querySelector(`.tab[data-stage="${stageId}"]`).classList.add('active');
+
+  // Start the new sketch
+  currentStage = stageId;
+  startSketch(stageId);
+}
+
+// Function to load the tree data for all stages
+async function loadAllStageData(baseTreeData) {
+  console.log("Loading stage data with base data:", baseTreeData);
+
+  // The base tree data is for the current stage
+  const currentStageId = baseTreeData.current_stage || 'Stage_1';
+
+  // Ensure base tree data is valid and has required properties
+  if (baseTreeData && baseTreeData.layout && baseTreeData.edges) {
+    stageData[currentStageId] = baseTreeData;
+    availableStages.push(currentStageId);
+    console.log(`Added current stage ${currentStageId} to available stages`);
+  } else {
+    console.warn(`Current stage ${currentStageId} data is invalid:`, baseTreeData);
+  }
+
+  // Use relative path to load other stage trees
+  const logDirPath = baseTreeData.log_dir_path || '.';
+  console.log("Log directory path:", logDirPath);
+
+  // Load data for each stage if available
+  const stageNames = ['Stage_1', 'Stage_2', 'Stage_3', 'Stage_4'];
+  const stageNames2actualNames = {
+    'Stage_1': 'stage_1_initial_implementation_1_preliminary',
+    'Stage_2': 'stage_2_baseline_tuning_1_first_attempt',
+    'Stage_3': 'stage_3_creative_research_1_first_attempt',
+    'Stage_4': 'stage_4_ablation_studies_1_first_attempt'
+    }
+
+  for (const stage of stageNames) {
+
+    if (baseTreeData.completed_stages && baseTreeData.completed_stages.includes(stage)) {
+      try {
+        console.log(`Attempting to load data for ${stage} from ${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+        const response = await fetch(`${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+
+        if (response.ok) {
+          const data = await response.json();
+
+          // Validate the loaded data
+          if (data && data.layout && data.edges) {
+            stageData[stage] = data;
+            availableStages.push(stage);
+            console.log(`Successfully loaded and validated data for ${stage}`);
+          } else {
+            console.warn(`Loaded data for ${stage} is invalid:`, data);
+          }
+        } else {
+          console.warn(`Failed to load data for ${stage} - HTTP status ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`Error loading data for ${stage}:`, error);
+      }
+    } else {
+      console.log(`Skipping stage ${stage} - not in completed stages list:`, baseTreeData.completed_stages);
+    }
+  }
+
+  // Update tab visibility based on available stages
+  updateTabVisibility();
+
+  // Start with the first available stage
+  if (availableStages.length > 0) {
+    selectStage(availableStages[0]);
+  } else {
+    console.warn("No stages available to display");
+    // Display a message in the canvas area
+    document.getElementById('canvas-container').innerHTML =
+      '<div style="padding: 20px; color: #333; text-align: center;"><h3>No valid tree data available to display</h3></div>';
+  }
+}
+
+// Update tab visibility based on available stages
+function updateTabVisibility() {
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(tab => {
+    const stageId = tab.getAttribute('data-stage');
+    if (availableStages.includes(stageId)) {
+      tab.classList.remove('disabled');
+    } else {
+      tab.classList.add('disabled');
+    }
+  });
+}
+
+// Utility function to set the node info in the right panel
+const setNodeInfo = (code, plan, plot_code, plot_plan, metrics = null, exc_type = '', exc_info = '',
+    exc_stack = [], plots = [], plot_analyses = [], vlm_feedback_summary = '',
+    datasets_successfully_tested = [], exec_time_feedback = '', exec_time = '') => {
+  const codeElm = document.getElementById("code");
+  if (codeElm) {
+    if (code) {
+      codeElm.innerHTML = hljs.highlight(code, { language: "python" }).value;
+    } else {
+      codeElm.innerHTML = '<p>No code available</p>';
+    }
+  }
+
+  const planElm = document.getElementById("plan");
+  if (planElm) {
+    if (plan) {
+      planElm.innerHTML = hljs.highlight(plan, { language: "plaintext" }).value;
+    } else {
+      planElm.innerHTML = '<p>No plan available</p>';
+    }
+  }
+
+  const plot_codeElm = document.getElementById("plot_code");
+  if (plot_codeElm) {
+    if (plot_code) {
+      plot_codeElm.innerHTML = hljs.highlight(plot_code, { language: "python" }).value;
+    } else {
+      plot_codeElm.innerHTML = '<p>No plot code available</p>';
+    }
+  }
+
+  const plot_planElm = document.getElementById("plot_plan");
+  if (plot_planElm) {
+    if (plot_plan) {
+      plot_planElm.innerHTML = hljs.highlight(plot_plan, { language: "plaintext" }).value;
+    } else {
+      plot_planElm.innerHTML = '<p>No plot plan available</p>';
+    }
+  }
+
+  const metricsElm = document.getElementById("metrics");
+  if (metricsElm) {
+      let metricsContent = `<h3>Metrics:</h3>`;
+      if (metrics && metrics.metric_names) {
+          for (const metric of metrics.metric_names) {
+              metricsContent += `<div class="metric-group">`;
+              metricsContent += `<h4>${metric.metric_name}</h4>`;
+              metricsContent += `<p><strong>Description:</strong> ${metric.description || 'N/A'}</p>`;
+              metricsContent += `<p><strong>Optimization:</strong> ${metric.lower_is_better ? 'Minimize' : 'Maximize'}</p>`;
+
+              // Create table for dataset values
+              metricsContent += `<table class="metric-table">
+                  <tr>
+                      <th>Dataset</th>
+                      <th>Final Value</th>
+                      <th>Best Value</th>
+                  </tr>`;
+
+              for (const dataPoint of metric.data) {
+                  metricsContent += `<tr>
+                      <td>${dataPoint.dataset_name}</td>
+                      <td>${dataPoint.final_value?.toFixed(4) || 'N/A'}</td>
+                      <td>${dataPoint.best_value?.toFixed(4) || 'N/A'}</td>
+                  </tr>`;
+              }
+
+              metricsContent += `</table></div>`;
+          }
+      } else if (metrics === null) {
+          metricsContent += `<p>No metrics available</p>`;
+      }
+      metricsElm.innerHTML = metricsContent;
+  }
+
+  // Add plots display
+  const plotsElm = document.getElementById("plots");
+  if (plotsElm) {
+      if (plots && plots.length > 0) {
+          let plotsContent = '';
+          plots.forEach(plotPath => {
+              plotsContent += `
+                  <div class="plot-item">
+                      <img src="${plotPath}" alt="Experiment Plot" onerror="console.error('Failed to load plot:', this.src)"/>
+                  </div>`;
+          });
+          plotsElm.innerHTML = plotsContent;
+      } else {
+          plotsElm.innerHTML = '';
+      }
+  }
+
+  // Add error info display
+  const errorElm = document.getElementById("exc_info");
+  if (errorElm) {
+    if (exc_type) {
+      let errorContent = `<h3 style="color: #ff5555">Exception Information:</h3>
+                          <p><strong>Type:</strong> ${exc_type}</p>`;
+
+      if (exc_info) {
+        errorContent += `<p><strong>Details:</strong> <pre>${JSON.stringify(exc_info, null, 2)}</pre></p>`;
+      }
+
+      if (exc_stack) {
+        errorContent += `<p><strong>Stack Trace:</strong> <pre>${exc_stack.join('\n')}</pre></p>`;
+      }
+
+      errorElm.innerHTML = errorContent;
+    } else {
+      errorElm.innerHTML = "No exception info available";
+    }
+  }
+
+  const exec_timeElm = document.getElementById("exec_time");
+  if (exec_timeElm) {
+    let exec_timeContent = '<div id="exec_time"><h3>Execution Time (in seconds):</h3><p>' + exec_time + '</p></div>';
+    exec_timeElm.innerHTML = exec_timeContent;
+  }
+
+  const exec_time_feedbackElm = document.getElementById("exec_time_feedback");
+  if (exec_time_feedbackElm) {
+    let exec_time_feedbackContent = '<div id="exec_time_feedback_content">'
+    exec_time_feedbackContent += '<h3>Execution Time Feedback:</h3>'
+    exec_time_feedbackContent += '<p>' + exec_time_feedback + '</p>'
+    exec_time_feedbackContent += '</div>';
+    exec_time_feedbackElm.innerHTML = exec_time_feedbackContent;
+  }
+
+  const vlm_feedbackElm = document.getElementById("vlm_feedback");
+  if (vlm_feedbackElm) {
+      let vlm_feedbackContent = '';
+
+      if (plot_analyses && plot_analyses.length > 0) {
+          vlm_feedbackContent += `<h3>Plot Analysis:</h3>`;
+          plot_analyses.forEach(analysis => {
+              if (analysis && analysis.plot_path) {  // Add null check
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <h4>Analysis for ${analysis.plot_path.split('/').pop()}</h4>
+                          <p>${analysis.analysis || 'No analysis available'}</p>
+                          <ul class="key-findings">
+                              ${(analysis.key_findings || []).map(finding => `<li>${finding}</li>`).join('')}
+                          </ul>
+                      </div>`;
+              } else {
+                  console.warn('Received invalid plot analysis:', analysis);
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <p>Invalid plot analysis data received</p>
+                      </div>`;
+              }
+          });
+      }
+
+      // Add actionable insights if available
+      if (vlm_feedback_summary && typeof vlm_feedback_summary === 'string') {
+          vlm_feedbackContent += `
+              <div class="vlm_feedback">
+                  <h3>VLM Feedback Summary:</h3>
+                  <p>${vlm_feedback_summary}</p>
+              </div>`;
+      }
+
+      console.log("Datasets successfully tested:", datasets_successfully_tested);
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          vlm_feedbackContent += `
+              <div id="datasets_successfully_tested">
+                  <h3>Datasets Successfully Tested:</h3>
+                  <p>${datasets_successfully_tested.join(', ')}</p>
+              </div>`;
+      }
+
+      if (!vlm_feedbackContent) {
+          vlm_feedbackContent = '<p>No insights available for this experiment.</p>';
+      }
+
+      vlm_feedbackElm.innerHTML = vlm_feedbackContent;
+  }
+
+  const datasets_successfully_testedElm = document.getElementById("datasets_successfully_tested");
+  if (datasets_successfully_testedElm) {
+      let datasets_successfully_testedContent = '';
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          datasets_successfully_testedContent = `<h3>Datasets Successfully Tested:</h3><ul>`;
+          datasets_successfully_tested.forEach(dataset => {
+              datasets_successfully_testedContent += `<li>${dataset}</li>`;
+          });
+          datasets_successfully_testedContent += `</ul>`;
+      } else {
+          datasets_successfully_testedContent = '<p>No datasets tested yet</p>';
+      }
+      datasets_successfully_testedElm.innerHTML = datasets_successfully_testedContent;
+  }
+};
+
+// Initialize with the provided tree data
+const treeStructData = {"edges": [[0, 1]], "layout": [[0.5, 0.0], [0.5, 1.0]], "plan": ["The main bug is that each dataset split was generated with different latent\nclass prototypes, so train/val/test came from incompatible label semantics; this\nexplains the exploding validation loss. I fix this by creating one shared\nsynthetic world (shared modality prototypes and class structure) and only\napplying a controlled stream shift to the test stream, while also standardizing\nfeatures using train-set statistics instead of per-sample normalization. I also\nmake the consistency update objective actually use cross-modal agreement via KL\nmatching to caption/rationale predictions, which better reflects the research\nidea than entropy-only updates under the consistency gate. The rest of the\nscript keeps the same lightweight setup, logs all required metrics, saves\narrays, and produces visualizations.", "Hyperparam tuning name: epochs. I would turn the baseline into a small\nhyperparameter-tuning script focused only on training length, comparing\n`epochs=15` vs `epochs=30` while keeping everything else fixed. The script will\nfactor training/evaluation into reusable functions, run both experiments end-to-\nend, record validation curves and stream metrics, and then select/report which\nepoch budget performs better. To satisfy the saving requirement, all losses,\nmetrics, predictions, stream outputs, and comparison summaries will be stored\ninside `experiment_data['hyperparam_tuning_epochs']['synthetic_vlm_stream']` and\nsaved to `experiment_data.npy`, along with additional `np.save()` dumps for\nplottable arrays. The code remains single-file and fully executable, including\nplots for per-setting training curves and stream rolling accuracy."], "code": ["import os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport time\nimport copy\nimport numpy as np\nimport matplotlib.pyplot as plt\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nfrom torch.utils.data import Dataset, DataLoader\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(7)\nnp.random.seed(7)\n\nexperiment_data = {\n    \"synthetic_vlm_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"test\": []},\n        \"losses\": {\"train\": [], \"val\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"timestamps\": [],\n        \"stream\": {},\n    }\n}\n\n\nclass SyntheticWorld:\n    def __init__(self, dim=16, num_classes=4, seed=7):\n        rng = np.random.RandomState(seed)\n        self.dim = dim\n        self.num_classes = num_classes\n        self.W_img = rng.randn(num_classes, dim).astype(np.float32) * 1.2\n        self.W_cap = rng.randn(num_classes, dim).astype(np.float32) * 0.8\n        self.W_rat = rng.randn(num_classes, dim).astype(np.float32) * 0.8\n\n\nclass SyntheticVLMDataset(Dataset):\n    def __init__(self, world, n=2000, shift=False, seed=0):\n        self.world = world\n        self.n = n\n        self.shift = shift\n        self.rng = np.random.RandomState(seed)\n        self.data = []\n        dim = world.dim\n        K = world.num_classes\n\n        for i in range(n):\n            y = self.rng.randint(0, K)\n            z = self.rng.randn(dim).astype(np.float32)\n\n            img = z + world.W_img[y] + 0.35 * self.rng.randn(dim).astype(np.float32)\n            cap = (\n                0.7 * z + world.W_cap[y] + 0.45 * self.rng.randn(dim).astype(np.float32)\n            )\n            rat = (\n                0.5 * z + world.W_rat[y] + 0.50 * self.rng.randn(dim).astype(np.float32)\n            )\n\n            if shift:\n                img = (\n                    0.60 * img\n                    + 0.85 * np.roll(img, 1)\n                    + 0.40 * self.rng.randn(dim).astype(np.float32)\n                )\n                if i % 7 == 0:\n                    img = img + 1.0 * self.rng.randn(dim).astype(np.float32)\n\n            self.data.append(\n                (\n                    img.astype(np.float32),\n                    cap.astype(np.float32),\n                    rat.astype(np.float32),\n                    int(y),\n                )\n            )\n\n    def __len__(self):\n        return self.n\n\n    def __getitem__(self, idx):\n        img, cap, rat, y = self.data[idx]\n        return {\n            \"image\": torch.tensor(img, dtype=torch.float32),\n            \"caption\": torch.tensor(cap, dtype=torch.float32),\n            \"rationale\": torch.tensor(rat, dtype=torch.float32),\n            \"label\": torch.tensor(y, dtype=torch.long),\n        }\n\n\nclass FeatureNormalizer:\n    def __init__(self, mean_dict, std_dict):\n        self.mean = {\n            k: torch.tensor(v, dtype=torch.float32).to(device)\n            for k, v in mean_dict.items()\n        }\n        self.std = {\n            k: torch.tensor(v, dtype=torch.float32).to(device)\n            for k, v in std_dict.items()\n        }\n\n    @classmethod\n    def from_dataset(cls, dataset):\n        stats = {}\n        for key in [\"image\", \"caption\", \"rationale\"]:\n            arr = np.stack([sample[key].numpy() for sample in dataset], axis=0)\n            stats[key] = (arr.mean(axis=0), arr.std(axis=0) + 1e-6)\n        mean_dict = {k: v[0] for k, v in stats.items()}\n        std_dict = {k: v[1] for k, v in stats.items()}\n        return cls(mean_dict, std_dict)\n\n    def normalize(self, batch):\n        out = {}\n        for k, v in batch.items():\n            out[k] = v.to(device) if isinstance(v, torch.Tensor) else v\n        for key in [\"image\", \"caption\", \"rationale\"]:\n            out[key] = (out[key] - self.mean[key]) / self.std[key]\n        return out\n\n\nclass SmallVLM(nn.Module):\n    def __init__(self, dim=16, hidden=64, num_classes=4):\n        super().__init__()\n        self.img_backbone = nn.Sequential(\n            nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU()\n        )\n        self.caption_head = nn.Sequential(\n            nn.Linear(dim, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, num_classes)\n        )\n        self.rationale_head = nn.Sequential(\n            nn.Linear(dim, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, num_classes)\n        )\n        self.adapter = nn.Sequential(\n            nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, num_classes)\n        )\n\n    def forward(self, image, caption, rationale):\n        h = self.img_backbone(image)\n        logits_main = self.adapter(h)\n        logits_cap = self.caption_head(caption)\n        logits_rat = self.rationale_head(rationale)\n        return logits_main, logits_cap, logits_rat\n\n\ndef supervised_loss(logits_main, logits_cap, logits_rat, y):\n    return (\n        F.cross_entropy(logits_main, y)\n        + 0.35 * F.cross_entropy(logits_cap, y)\n        + 0.35 * F.cross_entropy(logits_rat, y)\n    )\n\n\ndef evaluate_loader(model, loader, normalizer):\n    model.eval()\n    total_loss, total, correct = 0.0, 0, 0\n    preds_all, gt_all = [], []\n    with torch.no_grad():\n        for batch in loader:\n            batch = {\n                k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n            }\n            batch = normalizer.normalize(batch)\n            lm, lc, lr = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            loss = supervised_loss(lm, lc, lr, batch[\"label\"])\n            pred = lm.argmax(dim=-1)\n            bs = batch[\"label\"].size(0)\n            total_loss += loss.item() * bs\n            total += bs\n            correct += (pred == batch[\"label\"]).sum().item()\n            preds_all.extend(pred.detach().cpu().numpy().tolist())\n            gt_all.extend(batch[\"label\"].detach().cpu().numpy().tolist())\n    return total_loss / total, correct / total, np.array(preds_all), np.array(gt_all)\n\n\ndef entropy_min_loss(logits):\n    p = F.softmax(logits, dim=-1)\n    return -(p * torch.log(p + 1e-8)).sum(dim=-1).mean()\n\n\ndef consistency_alignment_loss(logits_main, logits_cap, logits_rat, temperature=1.0):\n    log_p_main = F.log_softmax(logits_main / temperature, dim=-1)\n    p_cap = F.softmax(logits_cap.detach() / temperature, dim=-1)\n    p_rat = F.softmax(logits_rat.detach() / temperature, dim=-1)\n    target = 0.5 * (p_cap + p_rat)\n    return F.kl_div(log_p_main, target, reduction=\"batchmean\")\n\n\ndef stream_eval_with_tta(\n    model_init, stream_loader, normalizer, mode=\"frozen\", lr=2e-3, conf_thresh=0.70\n):\n    model = copy.deepcopy(model_init).to(device)\n    for p in model.img_backbone.parameters():\n        p.requires_grad = False\n    for p in model.caption_head.parameters():\n        p.requires_grad = False\n    for p in model.rationale_head.parameters():\n        p.requires_grad = False\n    for p in model.adapter.parameters():\n        p.requires_grad = True\n    optimizer = torch.optim.Adam(model.adapter.parameters(), lr=lr)\n\n    preds, gts, update_flags, confidences, losses = [], [], [], [], []\n    model.eval()\n\n    for _, batch in enumerate(stream_loader):\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        batch = normalizer.normalize(batch)\n\n        with torch.no_grad():\n            lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            p_main = F.softmax(lm, dim=-1)\n            p_cap = F.softmax(lc, dim=-1)\n            p_rat = F.softmax(lrh, dim=-1)\n            conf, pred = p_main.max(dim=-1)\n            pred_cap = p_cap.argmax(dim=-1)\n            pred_rat = p_rat.argmax(dim=-1)\n\n            js_like = 0.5 * (\n                F.kl_div(torch.log(p_main + 1e-8), p_cap, reduction=\"batchmean\")\n                + F.kl_div(torch.log(p_main + 1e-8), p_rat, reduction=\"batchmean\")\n            )\n            agree = (pred == pred_cap) & (pred == pred_rat)\n            consistency_score = float(torch.exp(-js_like).item())\n\n            preds.append(int(pred.item()))\n            gts.append(int(batch[\"label\"].item()))\n            confidences.append(float(conf.item()))\n\n        do_update = False\n        if mode == \"entropy\":\n            do_update = True\n        elif mode == \"consistency\":\n            do_update = bool(\n                (conf > conf_thresh).item()\n                and agree.item()\n                and consistency_score > 0.65\n            )\n\n        if do_update:\n            model.train()\n            optimizer.zero_grad()\n            lm2, lc2, lr2 = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            if mode == \"entropy\":\n                loss = entropy_min_loss(lm2)\n            else:\n                loss = consistency_alignment_loss(\n                    lm2, lc2, lr2\n                ) + 0.1 * entropy_min_loss(lm2)\n            loss.backward()\n            torch.nn.utils.clip_grad_norm_(model.adapter.parameters(), 1.0)\n            optimizer.step()\n            losses.append(float(loss.item()))\n            update_flags.append(1)\n            model.eval()\n        else:\n            losses.append(0.0)\n            update_flags.append(0)\n\n    preds = np.array(preds)\n    gts = np.array(gts)\n    update_flags = np.array(update_flags)\n    confidences = np.array(confidences)\n    acc = float((preds == gts).mean())\n\n    correctness = (preds == gts).astype(np.float32)\n    w = 25\n    rolling = np.array(\n        [correctness[max(0, i - w + 1) : i + 1].mean() for i in range(len(correctness))]\n    )\n    penalties = []\n    for i in np.where(update_flags == 1)[0]:\n        pre = rolling[max(0, i - 1)]\n        post = rolling[min(len(rolling) - 1, i + 5)]\n        penalties.append(max(0.0, pre - post))\n    volatility_penalty = float(np.mean(penalties)) if penalties else 0.0\n    stability_adjusted_acc = acc - 0.5 * volatility_penalty\n\n    return {\n        \"acc\": acc,\n        \"stability_adjusted_acc\": stability_adjusted_acc,\n        \"preds\": preds,\n        \"gts\": gts,\n        \"updates\": update_flags,\n        \"confidences\": confidences,\n        \"rolling_acc\": rolling,\n        \"adapt_loss_mean\": float(np.mean(losses)),\n        \"adapt_freq\": float(update_flags.mean()),\n    }\n\n\n# Data\nworld = SyntheticWorld(dim=16, num_classes=4, seed=7)\ntrain_ds = SyntheticVLMDataset(world, n=2500, shift=False, seed=11)\nval_ds = SyntheticVLMDataset(world, n=500, shift=False, seed=13)\ntest_stream_ds = SyntheticVLMDataset(world, n=700, shift=True, seed=17)\n\nnormalizer = FeatureNormalizer.from_dataset(train_ds)\n\ntrain_loader = DataLoader(train_ds, batch_size=64, shuffle=True)\nval_loader = DataLoader(val_ds, batch_size=128, shuffle=False)\nstream_loader = DataLoader(test_stream_ds, batch_size=1, shuffle=False)\n\n# Model\nmodel = SmallVLM(dim=16, hidden=64, num_classes=4).to(device)\noptimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)\n\n# Train\nepochs = 15\nbest_state = None\nbest_val = float(\"inf\")\n\nfor epoch in range(1, epochs + 1):\n    model.train()\n    total_loss, total, correct = 0.0, 0, 0\n\n    for batch in train_loader:\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        batch = normalizer.normalize(batch)\n\n        optimizer.zero_grad()\n        lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n        loss = supervised_loss(lm, lc, lrh, batch[\"label\"])\n        loss.backward()\n        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)\n        optimizer.step()\n\n        pred = lm.argmax(dim=-1)\n        bs = batch[\"label\"].size(0)\n        total_loss += loss.item() * bs\n        total += bs\n        correct += (pred == batch[\"label\"]).sum().item()\n\n    train_loss = total_loss / total\n    train_acc = correct / total\n    val_loss, val_acc, _, _ = evaluate_loader(model, val_loader, normalizer)\n\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n\n    ts = time.time()\n    experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"].append(\n        (epoch, train_loss, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"].append(\n        (epoch, val_loss, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"train\"].append(\n        (epoch, train_acc, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"val\"].append(\n        (epoch, val_acc, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"timestamps\"].append(ts)\n\n    if val_loss < best_val:\n        best_val = val_loss\n        best_state = copy.deepcopy(model.state_dict())\n\nmodel.load_state_dict(best_state)\n\n# Stream evaluation baselines\nfrozen_res = stream_eval_with_tta(model, stream_loader, normalizer, mode=\"frozen\")\nentropy_res = stream_eval_with_tta(model, stream_loader, normalizer, mode=\"entropy\")\nconsistency_res = stream_eval_with_tta(\n    model, stream_loader, normalizer, mode=\"consistency\"\n)\n\nresults = {\"frozen\": frozen_res, \"entropy\": entropy_res, \"consistency\": consistency_res}\n\nfor name, res in results.items():\n    print(\n        f\"{name}: \"\n        f\"acc={res['acc']:.4f}, \"\n        f\"Stream Stability-Adjusted Accuracy={res['stability_adjusted_acc']:.4f}, \"\n        f\"adapt_freq={res['adapt_freq']:.4f}, \"\n        f\"adapt_loss_mean={res['adapt_loss_mean']:.4f}\"\n    )\n\n# Save metrics/predictions\nfor name, res in results.items():\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"test\"].append(\n        {\n            \"name\": name,\n            \"acc\": res[\"acc\"],\n            \"stability_adjusted_acc\": res[\"stability_adjusted_acc\"],\n            \"adapt_freq\": res[\"adapt_freq\"],\n            \"adapt_loss_mean\": res[\"adapt_loss_mean\"],\n            \"timestamp\": time.time(),\n        }\n    )\n\nexperiment_data[\"synthetic_vlm_stream\"][\"predictions\"] = {\n    \"frozen\": frozen_res[\"preds\"],\n    \"entropy\": entropy_res[\"preds\"],\n    \"consistency\": consistency_res[\"preds\"],\n}\nexperiment_data[\"synthetic_vlm_stream\"][\"ground_truth\"] = frozen_res[\"gts\"]\nexperiment_data[\"synthetic_vlm_stream\"][\"stream\"] = {\n    \"frozen_updates\": frozen_res[\"updates\"],\n    \"entropy_updates\": entropy_res[\"updates\"],\n    \"consistency_updates\": consistency_res[\"updates\"],\n    \"frozen_rolling_acc\": frozen_res[\"rolling_acc\"],\n    \"entropy_rolling_acc\": entropy_res[\"rolling_acc\"],\n    \"consistency_rolling_acc\": consistency_res[\"rolling_acc\"],\n    \"frozen_confidences\": frozen_res[\"confidences\"],\n    \"entropy_confidences\": entropy_res[\"confidences\"],\n    \"consistency_confidences\": consistency_res[\"confidences\"],\n}\n\nnp.save(os.path.join(working_dir, \"synthetic_preds_frozen.npy\"), frozen_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"synthetic_preds_entropy.npy\"), entropy_res[\"preds\"])\nnp.save(\n    os.path.join(working_dir, \"synthetic_preds_consistency.npy\"),\n    consistency_res[\"preds\"],\n)\nnp.save(os.path.join(working_dir, \"synthetic_ground_truth.npy\"), frozen_res[\"gts\"])\nnp.save(\n    os.path.join(working_dir, \"synthetic_entropy_updates.npy\"), entropy_res[\"updates\"]\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_consistency_updates.npy\"),\n    consistency_res[\"updates\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_frozen_rolling_acc.npy\"),\n    frozen_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_entropy_rolling_acc.npy\"),\n    entropy_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_consistency_rolling_acc.npy\"),\n    consistency_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_train_losses.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_val_losses.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_train_metrics.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"train\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_val_metrics.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"val\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_test_metrics.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"test\"], dtype=object),\n)\n\n# Visualization 1: rolling accuracy and updates\nplt.figure(figsize=(10, 5))\nx = np.arange(len(frozen_res[\"rolling_acc\"]))\nplt.plot(x, frozen_res[\"rolling_acc\"], label=\"Frozen\", linewidth=2)\nplt.plot(x, entropy_res[\"rolling_acc\"], label=\"Entropy TTA\", linewidth=2)\nplt.plot(x, consistency_res[\"rolling_acc\"], label=\"Consistency-Gated TTA\", linewidth=2)\nent_u = np.where(entropy_res[\"updates\"] == 1)[0]\ncon_u = np.where(consistency_res[\"updates\"] == 1)[0]\nif len(ent_u) > 0:\n    plt.scatter(\n        ent_u,\n        entropy_res[\"rolling_acc\"][ent_u],\n        s=10,\n        alpha=0.35,\n        label=\"Entropy updates\",\n    )\nif len(con_u) > 0:\n    plt.scatter(\n        con_u,\n        consistency_res[\"rolling_acc\"][con_u],\n        s=14,\n        alpha=0.5,\n        label=\"Consistency updates\",\n    )\nplt.xlabel(\"Stream step\")\nplt.ylabel(\"Rolling accuracy\")\nplt.title(\"Synthetic multimodal stream: rolling accuracy and adaptation events\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_stream_rolling_accuracy_fixed.png\"),\n    dpi=160,\n)\nplt.close()\n\n# Visualization 2: predictions vs GT on stream prefix\nplt.figure(figsize=(10, 4))\nn_show = 60\nplt.plot(frozen_res[\"gts\"][:n_show], label=\"Ground Truth\", marker=\"o\")\nplt.plot(entropy_res[\"preds\"][:n_show], label=\"Entropy Pred\", marker=\"x\")\nplt.plot(consistency_res[\"preds\"][:n_show], label=\"Consistency Pred\", marker=\"s\")\nplt.yticks(sorted(np.unique(frozen_res[\"gts\"])))\nplt.xlabel(\"Sample index\")\nplt.ylabel(\"Class\")\nplt.title(\"Sample predictions vs ground truth on stream prefix\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_stream_prediction_samples_fixed.png\"),\n    dpi=160,\n)\nplt.close()\n\n# Visualization 3: training curves\ntrain_curve = np.array(\n    [[x[0], x[1]] for x in experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"]],\n    dtype=float,\n)\nval_curve = np.array(\n    [[x[0], x[1]] for x in experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"]],\n    dtype=float,\n)\nplt.figure(figsize=(9, 4))\nplt.plot(train_curve[:, 0], train_curve[:, 1], label=\"Train loss\")\nplt.plot(val_curve[:, 0], val_curve[:, 1], label=\"Val loss\")\nplt.xlabel(\"Epoch\")\nplt.ylabel(\"Loss\")\nplt.title(\"Synthetic VLM training/validation loss\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_training_curves_fixed.png\"), dpi=160\n)\nplt.close()\n\n# Visualization 4: generative-style sample comparison (predicted label sequences)\nplt.figure(figsize=(10, 4))\nplt.step(\n    np.arange(n_show), frozen_res[\"gts\"][:n_show], where=\"mid\", label=\"Ground Truth\"\n)\nplt.step(\n    np.arange(n_show), frozen_res[\"preds\"][:n_show], where=\"mid\", label=\"Frozen Pred\"\n)\nplt.step(\n    np.arange(n_show),\n    consistency_res[\"preds\"][:n_show],\n    where=\"mid\",\n    label=\"Consistency Pred\",\n)\nplt.xlabel(\"Sample index\")\nplt.ylabel(\"Class\")\nplt.title(\"Generated sample-label sequence comparison on stream prefix\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_generated_sequence_comparison_fixed.png\"),\n    dpi=160,\n)\nplt.close()\n\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\n", "import os\nimport time\nimport copy\nimport numpy as np\nimport matplotlib.pyplot as plt\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nfrom torch.utils.data import Dataset, DataLoader\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(7)\nnp.random.seed(7)\n\nexperiment_data = {\n    \"hyperparam_tuning_epochs\": {\n        \"synthetic_vlm_stream\": {\n            \"metrics\": {\"train\": [], \"val\": [], \"test\": [], \"comparison\": []},\n            \"losses\": {\"train\": [], \"val\": []},\n            \"predictions\": {},\n            \"ground_truth\": [],\n            \"timestamps\": [],\n            \"stream\": {},\n            \"configs\": [],\n            \"summary\": {},\n        }\n    }\n}\n\n\nclass SyntheticWorld:\n    def __init__(self, dim=16, num_classes=4, seed=7):\n        rng = np.random.RandomState(seed)\n        self.dim = dim\n        self.num_classes = num_classes\n        self.W_img = rng.randn(num_classes, dim).astype(np.float32) * 1.2\n        self.W_cap = rng.randn(num_classes, dim).astype(np.float32) * 0.8\n        self.W_rat = rng.randn(num_classes, dim).astype(np.float32) * 0.8\n\n\nclass SyntheticVLMDataset(Dataset):\n    def __init__(self, world, n=2000, shift=False, seed=0):\n        self.world = world\n        self.n = n\n        self.shift = shift\n        self.rng = np.random.RandomState(seed)\n        self.data = []\n        dim = world.dim\n        K = world.num_classes\n\n        for i in range(n):\n            y = self.rng.randint(0, K)\n            z = self.rng.randn(dim).astype(np.float32)\n\n            img = z + world.W_img[y] + 0.35 * self.rng.randn(dim).astype(np.float32)\n            cap = (\n                0.7 * z + world.W_cap[y] + 0.45 * self.rng.randn(dim).astype(np.float32)\n            )\n            rat = (\n                0.5 * z + world.W_rat[y] + 0.50 * self.rng.randn(dim).astype(np.float32)\n            )\n\n            if shift:\n                img = (\n                    0.60 * img\n                    + 0.85 * np.roll(img, 1)\n                    + 0.40 * self.rng.randn(dim).astype(np.float32)\n                )\n                if i % 7 == 0:\n                    img = img + 1.0 * self.rng.randn(dim).astype(np.float32)\n\n            self.data.append(\n                (\n                    img.astype(np.float32),\n                    cap.astype(np.float32),\n                    rat.astype(np.float32),\n                    int(y),\n                )\n            )\n\n    def __len__(self):\n        return self.n\n\n    def __getitem__(self, idx):\n        img, cap, rat, y = self.data[idx]\n        return {\n            \"image\": torch.tensor(img, dtype=torch.float32),\n            \"caption\": torch.tensor(cap, dtype=torch.float32),\n            \"rationale\": torch.tensor(rat, dtype=torch.float32),\n            \"label\": torch.tensor(y, dtype=torch.long),\n        }\n\n\nclass FeatureNormalizer:\n    def __init__(self, mean_dict, std_dict):\n        self.mean = {\n            k: torch.tensor(v, dtype=torch.float32).to(device)\n            for k, v in mean_dict.items()\n        }\n        self.std = {\n            k: torch.tensor(v, dtype=torch.float32).to(device)\n            for k, v in std_dict.items()\n        }\n\n    @classmethod\n    def from_dataset(cls, dataset):\n        stats = {}\n        for key in [\"image\", \"caption\", \"rationale\"]:\n            arr = np.stack([sample[key].numpy() for sample in dataset], axis=0)\n            stats[key] = (arr.mean(axis=0), arr.std(axis=0) + 1e-6)\n        mean_dict = {k: v[0] for k, v in stats.items()}\n        std_dict = {k: v[1] for k, v in stats.items()}\n        return cls(mean_dict, std_dict)\n\n    def normalize(self, batch):\n        out = {}\n        for k, v in batch.items():\n            out[k] = v.to(device) if isinstance(v, torch.Tensor) else v\n        for key in [\"image\", \"caption\", \"rationale\"]:\n            out[key] = (out[key] - self.mean[key]) / self.std[key]\n        return out\n\n\nclass SmallVLM(nn.Module):\n    def __init__(self, dim=16, hidden=64, num_classes=4):\n        super().__init__()\n        self.img_backbone = nn.Sequential(\n            nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU()\n        )\n        self.caption_head = nn.Sequential(\n            nn.Linear(dim, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, num_classes)\n        )\n        self.rationale_head = nn.Sequential(\n            nn.Linear(dim, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, num_classes)\n        )\n        self.adapter = nn.Sequential(\n            nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, num_classes)\n        )\n\n    def forward(self, image, caption, rationale):\n        h = self.img_backbone(image)\n        logits_main = self.adapter(h)\n        logits_cap = self.caption_head(caption)\n        logits_rat = self.rationale_head(rationale)\n        return logits_main, logits_cap, logits_rat\n\n\ndef supervised_loss(logits_main, logits_cap, logits_rat, y):\n    return (\n        F.cross_entropy(logits_main, y)\n        + 0.35 * F.cross_entropy(logits_cap, y)\n        + 0.35 * F.cross_entropy(logits_rat, y)\n    )\n\n\ndef evaluate_loader(model, loader, normalizer):\n    model.eval()\n    total_loss, total, correct = 0.0, 0, 0\n    preds_all, gt_all = [], []\n    with torch.no_grad():\n        for batch in loader:\n            batch = {\n                k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n            }\n            batch = normalizer.normalize(batch)\n            lm, lc, lr = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            loss = supervised_loss(lm, lc, lr, batch[\"label\"])\n            pred = lm.argmax(dim=-1)\n            bs = batch[\"label\"].size(0)\n            total_loss += loss.item() * bs\n            total += bs\n            correct += (pred == batch[\"label\"]).sum().item()\n            preds_all.extend(pred.detach().cpu().numpy().tolist())\n            gt_all.extend(batch[\"label\"].detach().cpu().numpy().tolist())\n    return total_loss / total, correct / total, np.array(preds_all), np.array(gt_all)\n\n\ndef entropy_min_loss(logits):\n    p = F.softmax(logits, dim=-1)\n    return -(p * torch.log(p + 1e-8)).sum(dim=-1).mean()\n\n\ndef consistency_alignment_loss(logits_main, logits_cap, logits_rat, temperature=1.0):\n    log_p_main = F.log_softmax(logits_main / temperature, dim=-1)\n    p_cap = F.softmax(logits_cap.detach() / temperature, dim=-1)\n    p_rat = F.softmax(logits_rat.detach() / temperature, dim=-1)\n    target = 0.5 * (p_cap + p_rat)\n    return F.kl_div(log_p_main, target, reduction=\"batchmean\")\n\n\ndef stream_eval_with_tta(\n    model_init, stream_loader, normalizer, mode=\"frozen\", lr=2e-3, conf_thresh=0.70\n):\n    model = copy.deepcopy(model_init).to(device)\n    for p in model.img_backbone.parameters():\n        p.requires_grad = False\n    for p in model.caption_head.parameters():\n        p.requires_grad = False\n    for p in model.rationale_head.parameters():\n        p.requires_grad = False\n    for p in model.adapter.parameters():\n        p.requires_grad = True\n    optimizer = torch.optim.Adam(model.adapter.parameters(), lr=lr)\n\n    preds, gts, update_flags, confidences, losses = [], [], [], [], []\n    model.eval()\n\n    for _, batch in enumerate(stream_loader):\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        batch = normalizer.normalize(batch)\n\n        with torch.no_grad():\n            lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            p_main = F.softmax(lm, dim=-1)\n            p_cap = F.softmax(lc, dim=-1)\n            p_rat = F.softmax(lrh, dim=-1)\n            conf, pred = p_main.max(dim=-1)\n            pred_cap = p_cap.argmax(dim=-1)\n            pred_rat = p_rat.argmax(dim=-1)\n            js_like = 0.5 * (\n                F.kl_div(torch.log(p_main + 1e-8), p_cap, reduction=\"batchmean\")\n                + F.kl_div(torch.log(p_main + 1e-8), p_rat, reduction=\"batchmean\")\n            )\n            agree = (pred == pred_cap) & (pred == pred_rat)\n            consistency_score = float(torch.exp(-js_like).item())\n\n            preds.append(int(pred.item()))\n            gts.append(int(batch[\"label\"].item()))\n            confidences.append(float(conf.item()))\n\n        do_update = False\n        if mode == \"entropy\":\n            do_update = True\n        elif mode == \"consistency\":\n            do_update = bool(\n                (conf > conf_thresh).item()\n                and agree.item()\n                and consistency_score > 0.65\n            )\n\n        if do_update:\n            model.train()\n            optimizer.zero_grad()\n            lm2, lc2, lr2 = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            if mode == \"entropy\":\n                loss = entropy_min_loss(lm2)\n            else:\n                loss = consistency_alignment_loss(\n                    lm2, lc2, lr2\n                ) + 0.1 * entropy_min_loss(lm2)\n            loss.backward()\n            torch.nn.utils.clip_grad_norm_(model.adapter.parameters(), 1.0)\n            optimizer.step()\n            losses.append(float(loss.item()))\n            update_flags.append(1)\n            model.eval()\n        else:\n            losses.append(0.0)\n            update_flags.append(0)\n\n    preds = np.array(preds)\n    gts = np.array(gts)\n    update_flags = np.array(update_flags)\n    confidences = np.array(confidences)\n    acc = float((preds == gts).mean())\n\n    correctness = (preds == gts).astype(np.float32)\n    w = 25\n    rolling = np.array(\n        [correctness[max(0, i - w + 1) : i + 1].mean() for i in range(len(correctness))]\n    )\n    penalties = []\n    for i in np.where(update_flags == 1)[0]:\n        pre = rolling[max(0, i - 1)]\n        post = rolling[min(len(rolling) - 1, i + 5)]\n        penalties.append(max(0.0, pre - post))\n    volatility_penalty = float(np.mean(penalties)) if penalties else 0.0\n    stability_adjusted_acc = acc - 0.5 * volatility_penalty\n\n    return {\n        \"acc\": acc,\n        \"stability_adjusted_acc\": stability_adjusted_acc,\n        \"preds\": preds,\n        \"gts\": gts,\n        \"updates\": update_flags,\n        \"confidences\": confidences,\n        \"rolling_acc\": rolling,\n        \"adapt_loss_mean\": float(np.mean(losses)),\n        \"adapt_freq\": float(update_flags.mean()),\n    }\n\n\ndef train_and_select_model(\n    epochs, train_loader, val_loader, normalizer, dim=16, hidden=64, num_classes=4\n):\n    torch.manual_seed(7)\n    np.random.seed(7)\n\n    model = SmallVLM(dim=dim, hidden=hidden, num_classes=num_classes).to(device)\n    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)\n\n    best_state = None\n    best_val = float(\"inf\")\n    history = {\n        \"train_loss\": [],\n        \"val_loss\": [],\n        \"train_acc\": [],\n        \"val_acc\": [],\n        \"best_epoch\": None,\n        \"best_val_loss\": None,\n    }\n\n    for epoch in range(1, epochs + 1):\n        model.train()\n        total_loss, total, correct = 0.0, 0, 0\n\n        for batch in train_loader:\n            batch = {\n                k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n            }\n            batch = normalizer.normalize(batch)\n\n            optimizer.zero_grad()\n            lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            loss = supervised_loss(lm, lc, lrh, batch[\"label\"])\n            loss.backward()\n            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)\n            optimizer.step()\n\n            pred = lm.argmax(dim=-1)\n            bs = batch[\"label\"].size(0)\n            total_loss += loss.item() * bs\n            total += bs\n            correct += (pred == batch[\"label\"]).sum().item()\n\n        train_loss = total_loss / total\n        train_acc = correct / total\n        val_loss, val_acc, _, _ = evaluate_loader(model, val_loader, normalizer)\n        print(\n            f\"epochs={epochs} | epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}, val_acc={val_acc:.4f}\"\n        )\n\n        history[\"train_loss\"].append((epoch, train_loss, time.time()))\n        history[\"val_loss\"].append((epoch, val_loss, time.time()))\n        history[\"train_acc\"].append((epoch, train_acc, time.time()))\n        history[\"val_acc\"].append((epoch, val_acc, time.time()))\n\n        if val_loss < best_val:\n            best_val = val_loss\n            best_state = copy.deepcopy(model.state_dict())\n            history[\"best_epoch\"] = epoch\n            history[\"best_val_loss\"] = val_loss\n\n    model.load_state_dict(best_state)\n    return model, history\n\n\n# Data\nworld = SyntheticWorld(dim=16, num_classes=4, seed=7)\ntrain_ds = SyntheticVLMDataset(world, n=2500, shift=False, seed=11)\nval_ds = SyntheticVLMDataset(world, n=500, shift=False, seed=13)\ntest_stream_ds = SyntheticVLMDataset(world, n=700, shift=True, seed=17)\n\nnormalizer = FeatureNormalizer.from_dataset(train_ds)\n\ntrain_loader = DataLoader(train_ds, batch_size=64, shuffle=True)\nval_loader = DataLoader(val_ds, batch_size=128, shuffle=False)\nstream_loader = DataLoader(test_stream_ds, batch_size=1, shuffle=False)\n\nepoch_candidates = [15, 30]\nall_runs = {}\n\nfor epochs in epoch_candidates:\n    model, history = train_and_select_model(\n        epochs=epochs,\n        train_loader=train_loader,\n        val_loader=val_loader,\n        normalizer=normalizer,\n        dim=16,\n        hidden=64,\n        num_classes=4,\n    )\n\n    final_val_loss, final_val_acc, _, _ = evaluate_loader(model, val_loader, normalizer)\n    frozen_res = stream_eval_with_tta(model, stream_loader, normalizer, mode=\"frozen\")\n    entropy_res = stream_eval_with_tta(model, stream_loader, normalizer, mode=\"entropy\")\n    consistency_res = stream_eval_with_tta(\n        model, stream_loader, normalizer, mode=\"consistency\"\n    )\n\n    all_runs[epochs] = {\n        \"model\": model,\n        \"history\": history,\n        \"val_loss\": final_val_loss,\n        \"val_acc\": final_val_acc,\n        \"results\": {\n            \"frozen\": frozen_res,\n            \"entropy\": entropy_res,\n            \"consistency\": consistency_res,\n        },\n    }\n\n    key = f\"epochs_{epochs}\"\n    experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\n        \"configs\"\n    ].append({\"name\": key, \"epochs\": epochs, \"timestamp\": time.time()})\n\n    for item in history[\"train_loss\"]:\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"losses\"][\n            \"train\"\n        ].append((key, *item))\n    for item in history[\"val_loss\"]:\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"losses\"][\n            \"val\"\n        ].append((key, *item))\n    for item in history[\"train_acc\"]:\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"metrics\"][\n            \"train\"\n        ].append((key, *item))\n    for item in history[\"val_acc\"]:\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"metrics\"][\n            \"val\"\n        ].append((key, *item))\n\n    for name, res in all_runs[epochs][\"results\"].items():\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"metrics\"][\n            \"test\"\n        ].append(\n            {\n                \"config\": key,\n                \"name\": name,\n                \"epochs\": epochs,\n                \"val_loss\": final_val_loss,\n                \"val_acc\": final_val_acc,\n                \"best_epoch\": history[\"best_epoch\"],\n                \"best_val_loss\": history[\"best_val_loss\"],\n                \"acc\": res[\"acc\"],\n                \"stability_adjusted_acc\": res[\"stability_adjusted_acc\"],\n                \"adapt_freq\": res[\"adapt_freq\"],\n                \"adapt_loss_mean\": res[\"adapt_loss_mean\"],\n                \"timestamp\": time.time(),\n            }\n        )\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\n            \"predictions\"\n        ][f\"{key}_{name}\"] = res[\"preds\"]\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"stream\"][\n            f\"{key}_{name}_updates\"\n        ] = res[\"updates\"]\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"stream\"][\n            f\"{key}_{name}_rolling_acc\"\n        ] = res[\"rolling_acc\"]\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"stream\"][\n            f\"{key}_{name}_confidences\"\n        ] = res[\"confidences\"]\n\n    experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\n        \"timestamps\"\n    ].append(time.time())\n\nexperiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"ground_truth\"] = (\n    all_runs[15][\"results\"][\"frozen\"][\"gts\"]\n)\n\ncompare_rows = []\nfor epochs in epoch_candidates:\n    row = {\n        \"epochs\": epochs,\n        \"best_epoch\": all_runs[epochs][\"history\"][\"best_epoch\"],\n        \"best_val_loss\": all_runs[epochs][\"history\"][\"best_val_loss\"],\n        \"selected_model_val_loss\": all_runs[epochs][\"val_loss\"],\n        \"selected_model_val_acc\": all_runs[epochs][\"val_acc\"],\n        \"frozen_acc\": all_runs[epochs][\"results\"][\"frozen\"][\"acc\"],\n        \"frozen_saa\": all_runs[epochs][\"results\"][\"frozen\"][\"stability_adjusted_acc\"],\n        \"entropy_acc\": all_runs[epochs][\"results\"][\"entropy\"][\"acc\"],\n        \"entropy_saa\": all_runs[epochs][\"results\"][\"entropy\"][\"stability_adjusted_acc\"],\n        \"consistency_acc\": all_runs[epochs][\"results\"][\"consistency\"][\"acc\"],\n        \"consistency_saa\": all_runs[epochs][\"results\"][\"consistency\"][\n            \"stability_adjusted_acc\"\n        ],\n    }\n    compare_rows.append(row)\n    experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"metrics\"][\n        \"comparison\"\n    ].append(row)\n\nbest_by_val = min(compare_rows, key=lambda x: x[\"best_val_loss\"])\nbest_by_stream = max(compare_rows, key=lambda x: x[\"consistency_saa\"])\nexperiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"summary\"] = {\n    \"best_by_val_loss\": best_by_val,\n    \"best_by_consistency_stability_adjusted_acc\": best_by_stream,\n}\n\nfor row in compare_rows:\n    print(\n        f\"epochs={row['epochs']} | \"\n        f\"best_val_loss={row['best_val_loss']:.4f}, val_acc={row['selected_model_val_acc']:.4f}, \"\n        f\"frozen_acc={row['frozen_acc']:.4f}, entropy_acc={row['entropy_acc']:.4f}, \"\n        f\"consistency_acc={row['consistency_acc']:.4f}, consistency_saa={row['consistency_saa']:.4f}\"\n    )\n\n# Save plottable arrays\nfor epochs in epoch_candidates:\n    key = f\"epochs_{epochs}\"\n    hist = all_runs[epochs][\"history\"]\n    train_loss_arr = np.array([[x[0], x[1]] for x in hist[\"train_loss\"]], dtype=float)\n    val_loss_arr = np.array([[x[0], x[1]] for x in hist[\"val_loss\"]], dtype=float)\n    train_acc_arr = np.array([[x[0], x[1]] for x in hist[\"train_acc\"]], dtype=float)\n    val_acc_arr = np.array([[x[0], x[1]] for x in hist[\"val_acc\"]], dtype=float)\n\n    np.save(os.path.join(working_dir, f\"{key}_train_loss.npy\"), train_loss_arr)\n    np.save(os.path.join(working_dir, f\"{key}_val_loss.npy\"), val_loss_arr)\n    np.save(os.path.join(working_dir, f\"{key}_train_acc.npy\"), train_acc_arr)\n    np.save(os.path.join(working_dir, f\"{key}_val_acc.npy\"), val_acc_arr)\n\n    for mode, res in all_runs[epochs][\"results\"].items():\n        np.save(os.path.join(working_dir, f\"{key}_{mode}_preds.npy\"), res[\"preds\"])\n        np.save(os.path.join(working_dir, f\"{key}_{mode}_updates.npy\"), res[\"updates\"])\n        np.save(\n            os.path.join(working_dir, f\"{key}_{mode}_rolling_acc.npy\"),\n            res[\"rolling_acc\"],\n        )\n        np.save(\n            os.path.join(working_dir, f\"{key}_{mode}_confidences.npy\"),\n            res[\"confidences\"],\n        )\n\nnp.save(\n    os.path.join(working_dir, \"synthetic_ground_truth.npy\"),\n    experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"ground_truth\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_metrics_train.npy\"),\n    np.array(\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"metrics\"][\n            \"train\"\n        ],\n        dtype=object,\n    ),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_metrics_val.npy\"),\n    np.array(\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"metrics\"][\n            \"val\"\n        ],\n        dtype=object,\n    ),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_metrics_test.npy\"),\n    np.array(\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"metrics\"][\n            \"test\"\n        ],\n        dtype=object,\n    ),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_metrics_comparison.npy\"),\n    np.array(\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"metrics\"][\n            \"comparison\"\n        ],\n        dtype=object,\n    ),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_losses_train.npy\"),\n    np.array(\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"losses\"][\n            \"train\"\n        ],\n        dtype=object,\n    ),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_losses_val.npy\"),\n    np.array(\n        experiment_data[\"hyperparam_tuning_epochs\"][\"synthetic_vlm_stream\"][\"losses\"][\n            \"val\"\n        ],\n        dtype=object,\n    ),\n)\n\n# Visualization 1: val loss comparison\nplt.figure(figsize=(9, 4))\nfor epochs in epoch_candidates:\n    hist = all_runs[epochs][\"history\"]\n    val_curve = np.array([[x[0], x[1]] for x in hist[\"val_loss\"]], dtype=float)\n    plt.plot(\n        val_curve[:, 0],\n        val_curve[:, 1],\n        marker=\"o\",\n        linewidth=2,\n        label=f\"epochs={epochs}\",\n    )\nplt.xlabel(\"Epoch\")\nplt.ylabel(\"Validation loss\")\nplt.title(\"Validation loss vs training length\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(os.path.join(working_dir, \"epochs_tuning_val_loss.png\"), dpi=160)\nplt.close()\n\n# Visualization 2: train/val loss for both settings\nplt.figure(figsize=(10, 5))\nfor epochs in epoch_candidates:\n    hist = all_runs[epochs][\"history\"]\n    train_curve = np.array([[x[0], x[1]] for x in hist[\"train_loss\"]], dtype=float)\n    val_curve = np.array([[x[0], x[1]] for x in hist[\"val_loss\"]], dtype=float)\n    plt.plot(\n        train_curve[:, 0],\n        train_curve[:, 1],\n        linestyle=\"--\",\n        linewidth=1.8,\n        label=f\"train epochs={epochs}\",\n    )\n    plt.plot(\n        val_curve[:, 0], val_curve[:, 1], linewidth=2.2, label=f\"val epochs={epochs}\"\n    )\nplt.xlabel(\"Epoch\")\nplt.ylabel(\"Loss\")\nplt.title(\"Training and validation loss across epoch budgets\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(os.path.join(working_dir, \"epochs_tuning_train_val_loss.png\"), dpi=160)\nplt.close()\n\n# Visualization 3: consistency rolling accuracy comparison\nplt.figure(figsize=(10, 5))\nfor epochs in epoch_candidates:\n    res = all_runs[epochs][\"results\"][\"consistency\"]\n    x = np.arange(len(res[\"rolling_acc\"]))\n    plt.plot(x, res[\"rolling_acc\"], linewidth=2, label=f\"consistency epochs={epochs}\")\n    upd = np.where(res[\"updates\"] == 1)[0]\n    if len(upd) > 0:\n        plt.scatter(upd, res[\"rolling_acc\"][upd], s=10, alpha=0.35)\nplt.xlabel(\"Stream step\")\nplt.ylabel(\"Rolling accuracy\")\nplt.title(\"Consistency-gated TTA rolling accuracy by training length\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"epochs_tuning_consistency_rolling_acc.png\"), dpi=160\n)\nplt.close()\n\n# Visualization 4: bar chart of stream metrics\nlabels = [\n    \"frozen_acc\",\n    \"entropy_acc\",\n    \"consistency_acc\",\n    \"frozen_saa\",\n    \"entropy_saa\",\n    \"consistency_saa\",\n]\nvals_15 = [\n    compare_rows[0][\"frozen_acc\"],\n    compare_rows[0][\"entropy_acc\"],\n    compare_rows[0][\"consistency_acc\"],\n    compare_rows[0][\"frozen_saa\"],\n    compare_rows[0][\"entropy_saa\"],\n    compare_rows[0][\"consistency_saa\"],\n]\nvals_30 = [\n    compare_rows[1][\"frozen_acc\"],\n    compare_rows[1][\"entropy_acc\"],\n    compare_rows[1][\"consistency_acc\"],\n    compare_rows[1][\"frozen_saa\"],\n    compare_rows[1][\"entropy_saa\"],\n    compare_rows[1][\"consistency_saa\"],\n]\nx = np.arange(len(labels))\nw = 0.36\nplt.figure(figsize=(10, 4.5))\nplt.bar(x - w / 2, vals_15, width=w, label=\"epochs=15\")\nplt.bar(x + w / 2, vals_30, width=w, label=\"epochs=30\")\nplt.xticks(x, labels, rotation=20)\nplt.ylim(0, 1.05)\nplt.ylabel(\"Score\")\nplt.title(\"Validation-selected stream metrics by epoch budget\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(os.path.join(working_dir, \"epochs_tuning_stream_metrics.png\"), dpi=160)\nplt.close()\n\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\nprint(\"Saved experiment_data.npy and auxiliary numpy arrays/plots.\")\n"], "term_out": ["['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 1.1056', '\\n', 'Epoch\n2: validation_loss = 0.5178', '\\n', 'Epoch 3: validation_loss = 0.3201', '\\n',\n'Epoch 4: validation_loss = 0.2063', '\\n', 'Epoch 5: validation_loss = 0.1530',\n'\\n', 'Epoch 6: validation_loss = 0.1220', '\\n', 'Epoch 7: validation_loss =\n0.1044', '\\n', 'Epoch 8: validation_loss = 0.0915', '\\n', 'Epoch 9:\nvalidation_loss = 0.0835', '\\n', 'Epoch 10: validation_loss = 0.0771', '\\n',\n'Epoch 11: validation_loss = 0.0728', '\\n', 'Epoch 12: validation_loss =\n0.0697', '\\n', 'Epoch 13: validation_loss = 0.0672', '\\n', 'Epoch 14:\nvalidation_loss = 0.0643', '\\n', 'Epoch 15: validation_loss = 0.0624', '\\n',\n'frozen: acc=0.6829, Stream Stability-Adjusted Accuracy=0.6829,\nadapt_freq=0.0000, adapt_loss_mean=0.0000', '\\n', 'entropy: acc=0.4443, Stream\nStability-Adjusted Accuracy=0.4306, adapt_freq=1.0000, adapt_loss_mean=0.0450',\n'\\n', 'consistency: acc=0.8171, Stream Stability-Adjusted Accuracy=0.8092,\nadapt_freq=0.6514, adapt_loss_mean=0.0603', '\\n', 'Execution time: 4 seconds\nseconds (time limit is 2 hours).']", "['Using device: cuda', '\\n', 'epochs=15 | epoch 1: train_loss=1.8825,\nval_loss=1.1056, val_acc=0.9660', '\\n', 'epochs=15 | epoch 2: train_loss=0.7302,\nval_loss=0.5178, val_acc=0.9960', '\\n', 'epochs=15 | epoch 3: train_loss=0.4162,\nval_loss=0.3201, val_acc=0.9940', '\\n', 'epochs=15 | epoch 4: train_loss=0.2624,\nval_loss=0.2063, val_acc=1.0000', '\\n', 'epochs=15 | epoch 5: train_loss=0.1810,\nval_loss=0.1530, val_acc=1.0000', '\\n', 'epochs=15 | epoch 6: train_loss=0.1376,\nval_loss=0.1220, val_acc=1.0000', '\\n', 'epochs=15 | epoch 7: train_loss=0.1131,\nval_loss=0.1044, val_acc=1.0000', '\\n', 'epochs=15 | epoch 8: train_loss=0.0972,\nval_loss=0.0915, val_acc=1.0000', '\\n', 'epochs=15 | epoch 9: train_loss=0.0866,\nval_loss=0.0835, val_acc=1.0000', '\\n', 'epochs=15 | epoch 10:\ntrain_loss=0.0788, val_loss=0.0771, val_acc=1.0000', '\\n', 'epochs=15 | epoch\n11: train_loss=0.0730, val_loss=0.0728, val_acc=1.0000', '\\n', 'epochs=15 |\nepoch 12: train_loss=0.0685, val_loss=0.0697, val_acc=1.0000', '\\n', 'epochs=15\n| epoch 13: train_loss=0.0648, val_loss=0.0672, val_acc=1.0000', '\\n',\n'epochs=15 | epoch 14: train_loss=0.0618, val_loss=0.0643, val_acc=1.0000',\n'\\n', 'epochs=15 | epoch 15: train_loss=0.0594, val_loss=0.0624,\nval_acc=1.0000', '\\n', 'epochs=30 | epoch 1: train_loss=1.8825, val_loss=1.1056,\nval_acc=0.9660', '\\n', 'epochs=30 | epoch 2: train_loss=0.7302, val_loss=0.5178,\nval_acc=0.9960', '\\n', 'epochs=30 | epoch 3: train_loss=0.4162, val_loss=0.3201,\nval_acc=0.9940', '\\n', 'epochs=30 | epoch 4: train_loss=0.2624, val_loss=0.2063,\nval_acc=1.0000', '\\n', 'epochs=30 | epoch 5: train_loss=0.1810, val_loss=0.1530,\nval_acc=1.0000', '\\n', 'epochs=30 | epoch 6: train_loss=0.1376, val_loss=0.1220,\nval_acc=1.0000', '\\n', 'epochs=30 | epoch 7: train_loss=0.1131, val_loss=0.1044,\nval_acc=1.0000', '\\n', 'epochs=30 | epoch 8: train_loss=0.0972, val_loss=0.0915,\nval_acc=1.0000', '\\n', 'epochs=30 | epoch 9: train_loss=0.0866, val_loss=0.0835,\nval_acc=1.0000', '\\n', 'epochs=30 | epoch 10: train_loss=0.0788,\nval_loss=0.0771, val_acc=1.0000', '\\n', 'epochs=30 | epoch 11:\ntrain_loss=0.0730, val_loss=0.0728, val_acc=1.0000', '\\n', 'epochs=30 | epoch\n12: train_loss=0.0685, val_loss=0.0697, val_acc=1.0000', '\\n', 'epochs=30 |\nepoch 13: train_loss=0.0648, val_loss=0.0672, val_acc=1.0000', '\\n', 'epochs=30\n| epoch 14: train_loss=0.0618, val_loss=0.0643, val_acc=1.0000', '\\n',\n'epochs=30 | epoch 15: train_loss=0.0594, val_loss=0.0624, val_acc=1.0000',\n'\\n', 'epochs=30 | epoch 16: train_loss=0.0573, val_loss=0.0615,\nval_acc=1.0000', '\\n', 'epochs=30 | epoch 17: train_loss=0.0556,\nval_loss=0.0600, val_acc=1.0000', '\\n', 'epochs=30 | epoch 18:\ntrain_loss=0.0540, val_loss=0.0589, val_acc=1.0000', '\\n', 'epochs=30 | epoch\n19: train_loss=0.0527, val_loss=0.0582, val_acc=1.0000', '\\n', 'epochs=30 |\nepoch 20: train_loss=0.0516, val_loss=0.0574, val_acc=1.0000', '\\n', 'epochs=30\n| epoch 21: train_loss=0.0505, val_loss=0.0572, val_acc=1.0000', '\\n',\n'epochs=30 | epoch 22: train_loss=0.0498, val_loss=0.0570, val_acc=1.0000',\n'\\n', 'epochs=30 | epoch 23: train_loss=0.0487, val_loss=0.0562,\nval_acc=1.0000', '\\n', 'epochs=30 | epoch 24: train_loss=0.0480,\nval_loss=0.0561, val_acc=1.0000', '\\n', 'epochs=30 | epoch 25:\ntrain_loss=0.0473, val_loss=0.0554, val_acc=1.0000', '\\n', 'epochs=30 | epoch\n26: train_loss=0.0468, val_loss=0.0549, val_acc=1.0000', '\\n', 'epochs=30 |\nepoch 27: train_loss=0.0459, val_loss=0.0548, val_acc=1.0000', '\\n', 'epochs=30\n| epoch 28: train_loss=0.0455, val_loss=0.0545, val_acc=1.0000', '\\n',\n'epochs=30 | epoch 29: train_loss=0.0450, val_loss=0.0540, val_acc=1.0000',\n'\\n', 'epochs=30 | epoch 30: train_loss=0.0446, val_loss=0.0539,\nval_acc=1.0000', '\\n', 'epochs=15 | best_val_loss=0.0624, val_acc=1.0000,\nfrozen_acc=0.6829, entropy_acc=0.4443, consistency_acc=0.8171,\nconsistency_saa=0.8092', '\\n', 'epochs=30 | best_val_loss=0.0539,\nval_acc=1.0000, frozen_acc=0.6814, entropy_acc=0.4486, consistency_acc=0.8043,\nconsistency_saa=0.7972', '\\n', 'Saved experiment_data.npy and auxiliary numpy\narrays/plots.', '\\n', 'Execution time: 7 seconds seconds (time limit is 2\nhours).']"], "analysis": ["", "The script executed successfully, but there are important experiment-\ndesign/implementation issues relative to the stated stage goals. Main issue: the\nrun does not introduce the required two additional Hugging Face datasets and\ndoes not evaluate any real open VLM benchmark; it only uses a synthetic dataset,\nso the baseline_tuning objective is not met. Also, the hyperparameter tuning is\nvery limited (only epochs varied), despite the goal calling for broader tuning\nsuch as learning rate and batch size. Methodologically, the 30-epoch model\nachieves better validation loss but worse stream consistency performance than 15\nepochs, suggesting overfitting to the stationary validation set and mismatch\nwith shifted-stream selection. Potential code-level concern: `best_by_stream =\nmax(compare_rows, key=lambda x: x['consistency_saa'])` selects by consistency\nmode only, not overall stream robustness, which may bias summary conclusions.\nAnother concern is that `ground_truth` is taken from\n`all_runs[15]['results']['frozen']['gts']`; while labels should match across\nruns, this is brittle and should come directly from the dataset once. Fixes: add\nat least two real HF datasets (e.g., `lmms-lab/ScienceQA`,\n`HuggingFaceM4/ChartQA`, plus optionally `docvqa`-style datasets if feasible),\nrun the same frozen/entropy/confidence-gated/consistency baselines there, expand\ntuning to LR/batch size/adaptation LR/confidence threshold, and select/report\nmodels using shifted-stream metrics in addition to validation loss."], "exc_type": [null, null], "exc_info": [null, null], "exc_stack": [null, null], "exp_name": "0-run", "metrics": [{"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Model accuracy on the training set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Model accuracy on the validation set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "train loss", "lower_is_better": true, "description": "Loss on the training set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.059357, "best_value": 0.059357}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Loss on the validation set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.062449, "best_value": 0.062449}]}, {"metric_name": "test accuracy (frozen)", "lower_is_better": false, "description": "Test accuracy using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.682857, "best_value": 0.682857}]}, {"metric_name": "test stability-adjusted accuracy (frozen)", "lower_is_better": false, "description": "Stability-adjusted test accuracy using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.682857, "best_value": 0.682857}]}, {"metric_name": "test adaptation frequency (frozen)", "lower_is_better": true, "description": "Frequency of adaptation on the test set using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "test adaptation loss mean (frozen)", "lower_is_better": true, "description": "Mean adaptation loss on the test set using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "test accuracy (entropy)", "lower_is_better": false, "description": "Test accuracy using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.444286, "best_value": 0.444286}]}, {"metric_name": "test stability-adjusted accuracy (entropy)", "lower_is_better": false, "description": "Stability-adjusted test accuracy using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.430584, "best_value": 0.430584}]}, {"metric_name": "test adaptation frequency (entropy)", "lower_is_better": true, "description": "Frequency of adaptation on the test set using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "test adaptation loss mean (entropy)", "lower_is_better": true, "description": "Mean adaptation loss on the test set using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.045018, "best_value": 0.045018}]}, {"metric_name": "test accuracy (consistency)", "lower_is_better": false, "description": "Test accuracy using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.817143, "best_value": 0.817143}]}, {"metric_name": "test stability-adjusted accuracy (consistency)", "lower_is_better": false, "description": "Stability-adjusted test accuracy using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.809172, "best_value": 0.809172}]}, {"metric_name": "test adaptation frequency (consistency)", "lower_is_better": true, "description": "Frequency of adaptation on the test set using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.651429, "best_value": 0.651429}]}, {"metric_name": "test adaptation loss mean (consistency)", "lower_is_better": true, "description": "Mean adaptation loss on the test set using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.06029, "best_value": 0.06029}]}]}, {"metric_names": [{"metric_name": "training accuracy", "lower_is_better": false, "description": "Model accuracy on the training set for each saved configuration.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Model accuracy on the validation set for each saved configuration.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "training loss", "lower_is_better": true, "description": "Model loss on the training set for each saved configuration.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.044606, "best_value": 0.044606}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Model loss on the validation set for each saved configuration.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.053905, "best_value": 0.053905}]}, {"metric_name": "frozen stream accuracy", "lower_is_better": false, "description": "Final stream accuracy in frozen evaluation mode.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.681429, "best_value": 0.682857}]}, {"metric_name": "frozen stream stability-adjusted accuracy", "lower_is_better": false, "description": "Final stream stability-adjusted accuracy in frozen evaluation mode.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.681429, "best_value": 0.682857}]}, {"metric_name": "entropy-adaptation stream accuracy", "lower_is_better": false, "description": "Final stream accuracy in entropy adaptation mode.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.448571, "best_value": 0.448571}]}, {"metric_name": "entropy-adaptation stream stability-adjusted accuracy", "lower_is_better": false, "description": "Final stream stability-adjusted accuracy in entropy adaptation mode.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.434442, "best_value": 0.434442}]}, {"metric_name": "consistency-gated stream accuracy", "lower_is_better": false, "description": "Final stream accuracy in consistency-gated adaptation mode.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.804286, "best_value": 0.817143}]}, {"metric_name": "consistency-gated stream stability-adjusted accuracy", "lower_is_better": false, "description": "Final stream stability-adjusted accuracy in consistency-gated adaptation mode.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.797246, "best_value": 0.809172}]}, {"metric_name": "adaptation frequency", "lower_is_better": true, "description": "Final fraction of stream steps where adaptation was triggered across evaluation modes.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.644286, "best_value": 0.0}]}, {"metric_name": "mean adaptation loss", "lower_is_better": true, "description": "Final mean adaptation loss across stream evaluation modes.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.041855, "best_value": 0.0}]}]}], "is_best_node": [true, false], "plots": [["../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy_fixed.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples_fixed.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_training_curves_fixed.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_generated_sequence_comparison_fixed.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_loss.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_accuracy.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_rolling_accuracy_updates.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_vs_ground_truth_prefix.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_confidence_curves.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_final_test_metrics_bar.png"], []], "plot_paths": [["experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_training_curves_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_generated_sequence_comparison_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_loss.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_accuracy.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_rolling_accuracy_updates.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_vs_ground_truth_prefix.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_confidence_curves.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_final_test_metrics_bar.png"], []], "plot_analyses": [[{"analysis": "Loss decreases smoothly and monotonically for both training and validation, from roughly 1.9/1.1 to about 0.06 by the end. The gap between training and validation is small throughout and nearly vanishes after mid training, which indicates optimization is stable and there is no visible overfitting on this synthetic task. Convergence is very fast, with most gains achieved in the first 5\u20137 epochs, implying the dataset or objective is simple. For an initial implementation this is good evidence that the basic training pipeline works, but it also suggests the task may be too easy to stress-test adaptation methods.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy.png"}, {"analysis": "This reproduces the same train-versus-validation loss pattern: rapid early drop, then a long flat tail near very low loss. The near overlap of curves after a few epochs supports that the model generalizes well on the synthetic split. Because the curve shape is almost identical to the previous loss plot, it likely serves as a duplicate sanity-check figure rather than adding new evidence. The key takeaway remains that the base model/adapter can be trained reliably, but this alone does not validate test-time learning behavior.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples.png"}, {"analysis": "Training and validation accuracy rise to essentially 100% within about 3\u20135 epochs and then saturate. Validation is even slightly above training at the start, which is plausible on a small or easy synthetic split but also hints that regularization/noise in training may exceed validation difficulty. The complete saturation means the offline task is solved almost perfectly, so downstream stream experiments are probably probing distribution shift or online instability rather than standard generalization. For paper-quality evidence, later experiments should use harder datasets where accuracy does not ceiling this quickly.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy_fixed.png"}, {"analysis": "Rolling stream accuracy shows a strong separation among methods. Consistency-gated TTA stays mostly in the 0.7\u20131.0 range and trends upward over the stream, often reaching very high accuracy. Frozen inference is middling, oscillating around roughly 0.5\u20130.8. Entropy TTA is clearly unstable: it frequently drops far below frozen, with severe collapses around several regions of the stream. The adaptation event markers indicate both adaptive methods update often, but only the consistency-gated updates appear beneficial. This is the clearest plot supporting the central hypothesis: naive entropy minimization can reinforce errors, while gating with a stronger consistency signal stabilizes online adaptation.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples_fixed.png"}, {"analysis": "This is effectively the same stream-performance result and reinforces the same conclusion. Consistency-gated adaptation remains consistently above frozen and substantially above entropy-based adaptation across most stream steps. Entropy adaptation again shows repeated degradation episodes rather than recovery, suggesting harmful updates accumulate or are triggered on ambiguous samples. The duplication is not harmful, but future result sets would be stronger if this slot were used for complementary diagnostics such as update frequency, latency, or cumulative regret.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_training_curves_fixed.png"}, {"analysis": "Prediction confidence is near 1.0 for almost all stream steps for all three methods, with only intermittent dips. Despite this uniformly high confidence, the rolling-accuracy plots show large performance differences, especially the poor behavior of entropy TTA. That mismatch is important: confidence is badly calibrated in this synthetic setup and cannot by itself serve as a safe adaptation trigger. This directly motivates the paper idea, because cross-modal consistency appears more informative than raw confidence or low entropy when deciding whether to update.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_generated_sequence_comparison_fixed.png"}, {"analysis": "The aggregate metric bars summarize the stream results cleanly. Consistency has the best final accuracy and best stability-adjusted accuracy, both around the low 0.8s. Frozen is second, around the high 0.6s. Entropy is much worse, around the mid 0.4s, and its stability-adjusted score is slightly lower than its raw accuracy, reflecting volatility. The small gap between raw and stability-adjusted accuracy for consistency suggests not only better average performance but also smoother behavior. This is strong preliminary evidence in favor of the proposed gating mechanism on the synthetic benchmark.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_loss.png"}, {"analysis": "The sample-level sequence comparison on a stream prefix shows consistency-based predictions visually track the ground-truth class sequence more often than the frozen predictions. Frozen predictions appear to spend longer stretches on incorrect classes or abrupt mismatches, while consistency predictions align more frequently with the target transitions. Because this is a qualitative prefix view, it is useful for illustrating behavior but should not be over-interpreted quantitatively. It does, however, match the aggregate trend that consistency gating improves local prediction fidelity.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_accuracy.png"}, {"analysis": "This prediction comparison plot shows ground truth alongside frozen, entropy, and consistency predictions over a stream prefix. Consistency predictions overlap the ground truth more often than entropy predictions, while entropy appears to make more persistent mismatches. Frozen is intermediate. The figure qualitatively supports the stream-accuracy results by showing that consistency gating reduces error bursts. Since the lines are visually dense and class labels are discrete, a confusion matrix or per-class accuracy table would communicate failure modes more clearly in later experiments.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_rolling_accuracy_updates.png"}, {"analysis": "This prefix comparison between entropy and consistency predictions against ground truth again suggests consistency is closer to the true label sequence, while entropy exhibits more deviations and abrupt incorrect jumps. The qualitative contrast is useful because it makes the instability of entropy adaptation visible at the sample level. Still, the plot is crowded and limited to a short prefix, so it should be treated as illustrative rather than decisive. For the next stage, it would be valuable to annotate actual adaptation points and whether each update helped or hurt on subsequent samples.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_vs_ground_truth_prefix.png"}], []], "vlm_feedback_summary": ["The uploaded figures show a synthetic preliminary implementation with duplicated\ntraining/stream plots. Supervised training converges extremely quickly to near-\nzero loss and near-perfect accuracy, suggesting the toy task is easy or\npotentially too clean. In stream evaluation, consistency-gated adaptation\nclearly outperforms both frozen inference and entropy-based test-time\nadaptation, while entropy adaptation is unstable and often worse than frozen.\nConfidence traces remain near-saturated for all methods, indicating confidence\nalone is not a reliable stability signal. Final aggregate bars and sample-level\nprediction plots are consistent with the claim that consistency gating is safer\nthan entropy minimization in this synthetic setup, but the setup appears too\nsimple for strong scientific conclusions.", "[]"], "exec_time": [4.049548625946045, 7.860889196395874], "exec_time_feedback": ["", ""], "datasets_successfully_tested": [["[]"], []], "plot_code": ["import matplotlib.pyplot as plt\nimport numpy as np\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\ntry:\n    experiment_data = np.load(\n        os.path.join(working_dir, \"experiment_data.npy\"), allow_pickle=True\n    ).item()\nexcept Exception as e:\n    print(f\"Error loading experiment data: {e}\")\n    experiment_data = {}\n\ndataset_name = next(iter(experiment_data.keys()), None)\nds = experiment_data.get(dataset_name, {}) if dataset_name else {}\nlosses = ds.get(\"losses\", {})\nmetrics = ds.get(\"metrics\", {})\nstream = ds.get(\"stream\", {})\npreds = ds.get(\"predictions\", {})\ngts = np.array(ds.get(\"ground_truth\", []))\n\n\ndef to_epoch_value(arr):\n    out = []\n    for x in arr:\n        try:\n            out.append((float(x[0]), float(x[1])))\n        except Exception:\n            pass\n    return np.array(out) if out else np.empty((0, 2))\n\n\ntrain_loss = to_epoch_value(losses.get(\"train\", []))\nval_loss = to_epoch_value(losses.get(\"val\", []))\ntrain_acc = to_epoch_value(metrics.get(\"train\", []))\nval_acc = to_epoch_value(metrics.get(\"val\", []))\ntest_metrics = metrics.get(\"test\", [])\n\nprint(f\"dataset={dataset_name}\")\nif len(train_loss):\n    print(f\"final_train_loss={train_loss[-1,1]:.4f}\")\nif len(val_loss):\n    print(f\"final_val_loss={val_loss[-1,1]:.4f}\")\nif len(train_acc):\n    print(f\"final_train_acc={train_acc[-1,1]:.4f}\")\nif len(val_acc):\n    print(f\"final_val_acc={val_acc[-1,1]:.4f}\")\nfor m in test_metrics:\n    if isinstance(m, dict):\n        print(\n            f\"{m.get('name','unknown')}: \"\n            f\"acc={m.get('acc', np.nan):.4f}, \"\n            f\"stability_adjusted_acc={m.get('stability_adjusted_acc', np.nan):.4f}, \"\n            f\"adapt_freq={m.get('adapt_freq', np.nan):.4f}, \"\n            f\"adapt_loss_mean={m.get('adapt_loss_mean', np.nan):.4f}\"\n        )\n\ntry:\n    if len(train_loss) and len(val_loss):\n        plt.figure(figsize=(8, 4))\n        plt.plot(train_loss[:, 0], train_loss[:, 1], label=\"Train loss\")\n        plt.plot(val_loss[:, 0], val_loss[:, 1], label=\"Validation loss\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Loss\")\n        plt.title(f\"{dataset_name} dataset: Training curves\\nTrain vs Validation Loss\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset_name}_training_validation_loss.png\"),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot1: {e}\")\n    plt.close()\n\ntry:\n    if len(train_acc) and len(val_acc):\n        plt.figure(figsize=(8, 4))\n        plt.plot(train_acc[:, 0], train_acc[:, 1], label=\"Train accuracy\")\n        plt.plot(val_acc[:, 0], val_acc[:, 1], label=\"Validation accuracy\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Accuracy\")\n        plt.title(\n            f\"{dataset_name} dataset: Training curves\\nTrain vs Validation Accuracy\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset_name}_training_validation_accuracy.png\"\n            ),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot2: {e}\")\n    plt.close()\n\ntry:\n    fr = np.array(stream.get(\"frozen_rolling_acc\", []))\n    en = np.array(stream.get(\"entropy_rolling_acc\", []))\n    co = np.array(stream.get(\"consistency_rolling_acc\", []))\n    eu = np.array(stream.get(\"entropy_updates\", []))\n    cu = np.array(stream.get(\"consistency_updates\", []))\n    if len(fr) or len(en) or len(co):\n        plt.figure(figsize=(10, 5))\n        if len(fr):\n            plt.plot(np.arange(len(fr)), fr, label=\"Frozen\", linewidth=2)\n        if len(en):\n            plt.plot(np.arange(len(en)), en, label=\"Entropy TTA\", linewidth=2)\n        if len(co):\n            plt.plot(np.arange(len(co)), co, label=\"Consistency-Gated TTA\", linewidth=2)\n        if len(en) and len(eu):\n            idx = np.where(eu == 1)[0]\n            if len(idx):\n                plt.scatter(idx, en[idx], s=10, alpha=0.4, label=\"Entropy updates\")\n        if len(co) and len(cu):\n            idx = np.where(cu == 1)[0]\n            if len(idx):\n                plt.scatter(idx, co[idx], s=12, alpha=0.5, label=\"Consistency updates\")\n        plt.xlabel(\"Stream step\")\n        plt.ylabel(\"Rolling accuracy\")\n        plt.title(\n            f\"{dataset_name} dataset: Stream performance\\nRolling Accuracy with Adaptation Events\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset_name}_stream_rolling_accuracy_updates.png\"\n            ),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot3: {e}\")\n    plt.close()\n\ntry:\n    n_show = (\n        min(60, len(gts), *(len(np.array(v)) for v in preds.values()))\n        if len(preds)\n        else min(60, len(gts))\n    )\n    if n_show > 0:\n        plt.figure(figsize=(10, 4))\n        plt.plot(np.arange(n_show), gts[:n_show], label=\"Ground Truth\", marker=\"o\")\n        for name in [\"frozen\", \"entropy\", \"consistency\"]:\n            arr = np.array(preds.get(name, []))\n            if len(arr) >= n_show:\n                plt.plot(\n                    np.arange(n_show),\n                    arr[:n_show],\n                    label=f\"{name.title()} Pred\",\n                    marker=\"x\" if name == \"entropy\" else None,\n                )\n        plt.xlabel(\"Sample index\")\n        plt.ylabel(\"Class\")\n        plt.title(\n            f\"{dataset_name} dataset: Prediction comparison\\nLeft: Ground Truth, Right: Generated Samples over Stream Prefix\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset_name}_prediction_vs_ground_truth_prefix.png\"\n            ),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot4: {e}\")\n    plt.close()\n\ntry:\n    fc = np.array(stream.get(\"frozen_confidences\", []))\n    ec = np.array(stream.get(\"entropy_confidences\", []))\n    cc = np.array(stream.get(\"consistency_confidences\", []))\n    if len(fc) or len(ec) or len(cc):\n        plt.figure(figsize=(10, 4))\n        if len(fc):\n            plt.plot(np.arange(len(fc)), fc, label=\"Frozen confidence\")\n        if len(ec):\n            plt.plot(np.arange(len(ec)), ec, label=\"Entropy TTA confidence\")\n        if len(cc):\n            plt.plot(np.arange(len(cc)), cc, label=\"Consistency-Gated TTA confidence\")\n        plt.xlabel(\"Stream step\")\n        plt.ylabel(\"Confidence\")\n        plt.title(\n            f\"{dataset_name} dataset: Stream confidence\\nPrediction Confidence Across Stream Steps\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset_name}_stream_confidence_curves.png\"),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot5: {e}\")\n    plt.close()\n\ntry:\n    if test_metrics:\n        names = [m.get(\"name\", f\"model_{i}\") for i, m in enumerate(test_metrics)]\n        accs = [m.get(\"acc\", np.nan) for m in test_metrics]\n        stabs = [m.get(\"stability_adjusted_acc\", np.nan) for m in test_metrics]\n        x = np.arange(len(names))\n        plt.figure(figsize=(8, 4))\n        w = 0.35\n        plt.bar(x - w / 2, accs, width=w, label=\"Accuracy\")\n        plt.bar(x + w / 2, stabs, width=w, label=\"Stability-adjusted accuracy\")\n        plt.xticks(x, names)\n        plt.ylabel(\"Metric value\")\n        plt.title(\n            f\"{dataset_name} dataset: Final test metrics\\nComparison of Stream Evaluation Modes\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset_name}_final_test_metrics_bar.png\"),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot6: {e}\")\n    plt.close()\n", null], "plot_plan": ["I\u2019ll load the saved experiment dictionary, inspect the single dataset key, and extract only the arrays and records that are actually present. I\u2019ll then print a compact summary of the available train/validation losses, train/validation accuracies, and test metrics for the frozen, entropy, and consistency modes. For visualization, I\u2019ll create separate plots for training/validation loss, training/validation accuracy, stream rolling accuracy with adaptation events, prediction-vs-ground-truth over a short stream prefix, confidence over stream steps if present, and a bar chart of final test metrics. Each figure will be wrapped in its own try-except block, saved into the required working directory with descriptive filenames containing the dataset name and plot type, and closed afterward. To avoid inventing data, every plot will first check that the corresponding entries exist and have usable length. For sequence-style plots, I\u2019ll cap the displayed prefix to a reasonable length derived from the true available stream arrays. Titles will explicitly reference the synthetic dataset and use clear subtitles describing left/right or comparison content where appropriate. Finally, the script will print the extracted evaluation metrics so the run is useful even without opening the saved images.", null], "ablation_name": [null, null], "hyperparam_name": [null, "epochs"], "is_seed_node": [false, false], "is_seed_agg_node": [false, false], "parse_metrics_plan": ["I\u2019ll load the saved `experiment_data.npy` from the `working` directory, inspect\nits nested structure, and extract the final or best values from the stored\ntraining, validation, and test metrics. For each dataset key, I\u2019ll print the\ndataset name first, then clearly labeled metric names such as train accuracy,\nvalidation loss, best validation accuracy, and test accuracy for each test mode.\nSince the saved test metrics are stored as a list of dictionaries, I\u2019ll handle\nthose separately and print the final reported values for each method. The script\nwill run immediately at global scope and will not generate any plots.", "I\u2019ll load the saved `experiment_data.npy` from the `working` directory, inspect\nthe nested structure, and extract the final or best values from the stored\nmetric collections. For this experiment, the main dataset is\n`synthetic_vlm_stream` under `hyperparam_tuning_epochs`, and the most useful\nfinal summaries come from the stored `summary`, `metrics[\"comparison\"]`, and the\nlast/best entries in train/validation histories. The script will print the\ndataset name first, then clearly labeled metric names such as training accuracy,\nvalidation loss, frozen stream accuracy, and consistency stability-adjusted\naccuracy. It will not create any plots and will run immediately at global scope."], "parse_metrics_code": ["import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nexperiment_data_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(experiment_data_path, allow_pickle=True).item()\n\n\ndef safe_float(x):\n    try:\n        return float(x)\n    except Exception:\n        return x\n\n\ndef get_final_tuple_value(records):\n    if not records:\n        return None\n    last = records[-1]\n    if isinstance(last, (list, tuple)) and len(last) >= 2:\n        return safe_float(last[1])\n    return None\n\n\ndef get_best_tuple_value(records, mode=\"max\"):\n    if not records:\n        return None\n    values = []\n    for item in records:\n        if isinstance(item, (list, tuple)) and len(item) >= 2:\n            values.append(safe_float(item[1]))\n    if not values:\n        return None\n    return max(values) if mode == \"max\" else min(values)\n\n\ndef print_metric(label, value):\n    if value is None:\n        print(f\"{label}: N/A\")\n    elif isinstance(value, float):\n        print(f\"{label}: {value:.6f}\")\n    else:\n        print(f\"{label}: {value}\")\n\n\nfor dataset_name, dataset_payload in experiment_data.items():\n    print(f\"Dataset: {dataset_name}\")\n\n    metrics = dataset_payload.get(\"metrics\", {})\n    losses = dataset_payload.get(\"losses\", {})\n\n    train_accuracy_final = get_final_tuple_value(metrics.get(\"train\", []))\n    train_accuracy_best = get_best_tuple_value(metrics.get(\"train\", []), mode=\"max\")\n\n    validation_accuracy_final = get_final_tuple_value(metrics.get(\"val\", []))\n    validation_accuracy_best = get_best_tuple_value(metrics.get(\"val\", []), mode=\"max\")\n\n    train_loss_final = get_final_tuple_value(losses.get(\"train\", []))\n    train_loss_best = get_best_tuple_value(losses.get(\"train\", []), mode=\"min\")\n\n    validation_loss_final = get_final_tuple_value(losses.get(\"val\", []))\n    validation_loss_best = get_best_tuple_value(losses.get(\"val\", []), mode=\"min\")\n\n    print_metric(\"Final train accuracy\", train_accuracy_final)\n    print_metric(\"Best train accuracy\", train_accuracy_best)\n    print_metric(\"Final validation accuracy\", validation_accuracy_final)\n    print_metric(\"Best validation accuracy\", validation_accuracy_best)\n    print_metric(\"Final train loss\", train_loss_final)\n    print_metric(\"Best train loss\", train_loss_best)\n    print_metric(\"Final validation loss\", validation_loss_final)\n    print_metric(\"Best validation loss\", validation_loss_best)\n\n    test_metrics = metrics.get(\"test\", [])\n    if test_metrics:\n        for test_entry in test_metrics:\n            if isinstance(test_entry, dict):\n                method_name = test_entry.get(\"name\", \"unknown\")\n                print_metric(f\"Test accuracy ({method_name})\", test_entry.get(\"acc\"))\n                print_metric(\n                    f\"Test stability-adjusted accuracy ({method_name})\",\n                    test_entry.get(\"stability_adjusted_acc\"),\n                )\n                print_metric(\n                    f\"Test adaptation frequency ({method_name})\",\n                    test_entry.get(\"adapt_freq\"),\n                )\n                print_metric(\n                    f\"Test adaptation loss mean ({method_name})\",\n                    test_entry.get(\"adapt_loss_mean\"),\n                )\n    else:\n        print(\"Test metrics: N/A\")\n\n    print()\n", "import os\nimport numpy as np\n\n\ndef safe_float(x):\n    try:\n        return float(x)\n    except Exception:\n        return x\n\n\ndef load_experiment_data():\n    working_dir = os.path.join(os.getcwd(), \"working\")\n    file_path = os.path.join(working_dir, \"experiment_data.npy\")\n    if not os.path.exists(file_path):\n        raise FileNotFoundError(f\"Could not find experiment data file: {file_path}\")\n    return np.load(file_path, allow_pickle=True).item()\n\n\ndef group_history_by_config(records):\n    grouped = {}\n    for item in records:\n        # Expected structure from original code:\n        # (config_key, epoch, value, timestamp)\n        if len(item) < 3:\n            continue\n        config_key = item[0]\n        epoch = item[1]\n        value = item[2]\n        grouped.setdefault(config_key, []).append((epoch, value))\n    for config_key in grouped:\n        grouped[config_key] = sorted(grouped[config_key], key=lambda x: x[0])\n    return grouped\n\n\ndef print_history_summaries(dataset_name, dataset_blob):\n    metrics = dataset_blob.get(\"metrics\", {})\n    losses = dataset_blob.get(\"losses\", {})\n\n    train_acc_grouped = group_history_by_config(metrics.get(\"train\", []))\n    val_acc_grouped = group_history_by_config(metrics.get(\"val\", []))\n    train_loss_grouped = group_history_by_config(losses.get(\"train\", []))\n    val_loss_grouped = group_history_by_config(losses.get(\"val\", []))\n\n    all_configs = sorted(\n        set(train_acc_grouped.keys())\n        | set(val_acc_grouped.keys())\n        | set(train_loss_grouped.keys())\n        | set(val_loss_grouped.keys())\n    )\n\n    for config_key in all_configs:\n        print(f\"Dataset: {dataset_name}\")\n        print(f\"Configuration name: {config_key}\")\n\n        if config_key in train_acc_grouped and train_acc_grouped[config_key]:\n            final_train_acc = train_acc_grouped[config_key][-1][1]\n            best_train_acc = max(v for _, v in train_acc_grouped[config_key])\n            print(f\"Final training accuracy: {safe_float(final_train_acc):.6f}\")\n            print(f\"Best training accuracy: {safe_float(best_train_acc):.6f}\")\n\n        if config_key in val_acc_grouped and val_acc_grouped[config_key]:\n            final_val_acc = val_acc_grouped[config_key][-1][1]\n            best_val_acc = max(v for _, v in val_acc_grouped[config_key])\n            print(f\"Final validation accuracy: {safe_float(final_val_acc):.6f}\")\n            print(f\"Best validation accuracy: {safe_float(best_val_acc):.6f}\")\n\n        if config_key in train_loss_grouped and train_loss_grouped[config_key]:\n            final_train_loss = train_loss_grouped[config_key][-1][1]\n            best_train_loss = min(v for _, v in train_loss_grouped[config_key])\n            print(f\"Final training loss: {safe_float(final_train_loss):.6f}\")\n            print(f\"Best training loss: {safe_float(best_train_loss):.6f}\")\n\n        if config_key in val_loss_grouped and val_loss_grouped[config_key]:\n            final_val_loss = val_loss_grouped[config_key][-1][1]\n            best_val_loss = min(v for _, v in val_loss_grouped[config_key])\n            print(f\"Final validation loss: {safe_float(final_val_loss):.6f}\")\n            print(f\"Best validation loss: {safe_float(best_val_loss):.6f}\")\n\n        print(\"-\" * 60)\n\n\ndef print_test_metric_summaries(dataset_name, dataset_blob):\n    test_metrics = dataset_blob.get(\"metrics\", {}).get(\"test\", [])\n    if not test_metrics:\n        return\n\n    for row in test_metrics:\n        config_name = row.get(\"config\", \"unknown_config\")\n        evaluation_name = row.get(\"name\", \"unknown_evaluation\")\n\n        print(f\"Dataset: {dataset_name}\")\n        print(f\"Configuration name: {config_name}\")\n        print(f\"Evaluation mode: {evaluation_name}\")\n        if \"epochs\" in row:\n            print(f\"Training epochs: {row['epochs']}\")\n        if \"best_epoch\" in row:\n            print(f\"Best validation epoch: {row['best_epoch']}\")\n        if \"best_val_loss\" in row:\n            print(f\"Best validation loss: {safe_float(row['best_val_loss']):.6f}\")\n        if \"val_loss\" in row:\n            print(f\"Selected model validation loss: {safe_float(row['val_loss']):.6f}\")\n        if \"val_acc\" in row:\n            print(\n                f\"Selected model validation accuracy: {safe_float(row['val_acc']):.6f}\"\n            )\n        if \"acc\" in row:\n            print(f\"Final stream accuracy: {safe_float(row['acc']):.6f}\")\n        if \"stability_adjusted_acc\" in row:\n            print(\n                f\"Final stream stability-adjusted accuracy: \"\n                f\"{safe_float(row['stability_adjusted_acc']):.6f}\"\n            )\n        if \"adapt_freq\" in row:\n            print(f\"Final adaptation frequency: {safe_float(row['adapt_freq']):.6f}\")\n        if \"adapt_loss_mean\" in row:\n            print(\n                f\"Final mean adaptation loss: {safe_float(row['adapt_loss_mean']):.6f}\"\n            )\n        print(\"-\" * 60)\n\n\ndef print_comparison_summaries(dataset_name, dataset_blob):\n    comparison_rows = dataset_blob.get(\"metrics\", {}).get(\"comparison\", [])\n    if not comparison_rows:\n        return\n\n    for row in comparison_rows:\n        print(f\"Dataset: {dataset_name}\")\n        print(f\"Training epochs: {row.get('epochs', 'unknown')}\")\n        if \"best_epoch\" in row:\n            print(f\"Best validation epoch: {row['best_epoch']}\")\n        if \"best_val_loss\" in row:\n            print(f\"Best validation loss: {safe_float(row['best_val_loss']):.6f}\")\n        if \"selected_model_val_loss\" in row:\n            print(\n                f\"Selected model validation loss: \"\n                f\"{safe_float(row['selected_model_val_loss']):.6f}\"\n            )\n        if \"selected_model_val_acc\" in row:\n            print(\n                f\"Selected model validation accuracy: \"\n                f\"{safe_float(row['selected_model_val_acc']):.6f}\"\n            )\n        if \"frozen_acc\" in row:\n            print(f\"Frozen stream accuracy: {safe_float(row['frozen_acc']):.6f}\")\n        if \"frozen_saa\" in row:\n            print(\n                f\"Frozen stream stability-adjusted accuracy: \"\n                f\"{safe_float(row['frozen_saa']):.6f}\"\n            )\n        if \"entropy_acc\" in row:\n            print(\n                f\"Entropy-adaptation stream accuracy: {safe_float(row['entropy_acc']):.6f}\"\n            )\n        if \"entropy_saa\" in row:\n            print(\n                f\"Entropy-adaptation stream stability-adjusted accuracy: \"\n                f\"{safe_float(row['entropy_saa']):.6f}\"\n            )\n        if \"consistency_acc\" in row:\n            print(\n                f\"Consistency-gated adaptation stream accuracy: \"\n                f\"{safe_float(row['consistency_acc']):.6f}\"\n            )\n        if \"consistency_saa\" in row:\n            print(\n                f\"Consistency-gated adaptation stream stability-adjusted accuracy: \"\n                f\"{safe_float(row['consistency_saa']):.6f}\"\n            )\n        print(\"-\" * 60)\n\n\ndef print_summary_block(dataset_name, dataset_blob):\n    summary = dataset_blob.get(\"summary\", {})\n    if not summary:\n        return\n\n    print(f\"Dataset: {dataset_name}\")\n\n    best_by_val = summary.get(\"best_by_val_loss\")\n    if best_by_val:\n        print(\"Summary metric: best configuration by validation loss\")\n        print(\n            f\"Best-by-validation-loss training epochs: {best_by_val.get('epochs', 'unknown')}\"\n        )\n        print(\n            f\"Best-by-validation-loss validation epoch: {best_by_val.get('best_epoch', 'unknown')}\"\n        )\n        print(\n            f\"Best-by-validation-loss validation loss: \"\n            f\"{safe_float(best_by_val.get('best_val_loss')):.6f}\"\n        )\n        print(\n            f\"Best-by-validation-loss validation accuracy: \"\n            f\"{safe_float(best_by_val.get('selected_model_val_acc')):.6f}\"\n        )\n        print(\n            f\"Best-by-validation-loss frozen stream accuracy: \"\n            f\"{safe_float(best_by_val.get('frozen_acc')):.6f}\"\n        )\n        print(\n            f\"Best-by-validation-loss entropy-adaptation stream accuracy: \"\n            f\"{safe_float(best_by_val.get('entropy_acc')):.6f}\"\n        )\n        print(\n            f\"Best-by-validation-loss consistency-gated stream accuracy: \"\n            f\"{safe_float(best_by_val.get('consistency_acc')):.6f}\"\n        )\n        print(\n            f\"Best-by-validation-loss consistency-gated stream stability-adjusted accuracy: \"\n            f\"{safe_float(best_by_val.get('consistency_saa')):.6f}\"\n        )\n\n    best_by_stream = summary.get(\"best_by_consistency_stability_adjusted_acc\")\n    if best_by_stream:\n        print(\n            \"Summary metric: best configuration by consistency-gated stability-adjusted accuracy\"\n        )\n        print(\n            f\"Best-by-consistency-stability-adjusted-accuracy training epochs: \"\n            f\"{best_by_stream.get('epochs', 'unknown')}\"\n        )\n        print(\n            f\"Best-by-consistency-stability-adjusted-accuracy validation epoch: \"\n            f\"{best_by_stream.get('best_epoch', 'unknown')}\"\n        )\n        print(\n            f\"Best-by-consistency-stability-adjusted-accuracy validation loss: \"\n            f\"{safe_float(best_by_stream.get('best_val_loss')):.6f}\"\n        )\n        print(\n            f\"Best-by-consistency-stability-adjusted-accuracy validation accuracy: \"\n            f\"{safe_float(best_by_stream.get('selected_model_val_acc')):.6f}\"\n        )\n        print(\n            f\"Best-by-consistency-stability-adjusted-accuracy frozen stream accuracy: \"\n            f\"{safe_float(best_by_stream.get('frozen_acc')):.6f}\"\n        )\n        print(\n            f\"Best-by-consistency-stability-adjusted-accuracy entropy-adaptation stream accuracy: \"\n            f\"{safe_float(best_by_stream.get('entropy_acc')):.6f}\"\n        )\n        print(\n            f\"Best-by-consistency-stability-adjusted-accuracy consistency-gated stream accuracy: \"\n            f\"{safe_float(best_by_stream.get('consistency_acc')):.6f}\"\n        )\n        print(\n            f\"Best-by-consistency-stability-adjusted-accuracy consistency-gated stream stability-adjusted accuracy: \"\n            f\"{safe_float(best_by_stream.get('consistency_saa')):.6f}\"\n        )\n\n    print(\"-\" * 60)\n\n\ndef analyze_experiment_data(experiment_data):\n    for experiment_name, experiment_group in experiment_data.items():\n        for dataset_name, dataset_blob in experiment_group.items():\n            print(f\"Dataset: {dataset_name}\")\n            print(f\"Experiment group: {experiment_name}\")\n\n            configs = dataset_blob.get(\"configs\", [])\n            if configs:\n                print(f\"Number of saved configurations: {len(configs)}\")\n            ground_truth = dataset_blob.get(\"ground_truth\", [])\n            if isinstance(ground_truth, np.ndarray):\n                print(f\"Number of stream ground-truth labels: {len(ground_truth)}\")\n            elif isinstance(ground_truth, list):\n                print(f\"Number of stream ground-truth labels: {len(ground_truth)}\")\n            print(\"-\" * 60)\n\n            print_history_summaries(dataset_name, dataset_blob)\n            print_test_metric_summaries(dataset_name, dataset_blob)\n            print_comparison_summaries(dataset_name, dataset_blob)\n            print_summary_block(dataset_name, dataset_blob)\n\n\nexperiment_data = load_experiment_data()\nanalyze_experiment_data(experiment_data)\n"], "parse_term_out": ["['Dataset: synthetic_vlm_stream', '\\n', 'Final train accuracy: 1.000000', '\\n',\n'Best train accuracy: 1.000000', '\\n', 'Final validation accuracy: 1.000000',\n'\\n', 'Best validation accuracy: 1.000000', '\\n', 'Final train loss: 0.059357',\n'\\n', 'Best train loss: 0.059357', '\\n', 'Final validation loss: 0.062449',\n'\\n', 'Best validation loss: 0.062449', '\\n', 'Test accuracy (frozen):\n0.682857', '\\n', 'Test stability-adjusted accuracy (frozen): 0.682857', '\\n',\n'Test adaptation frequency (frozen): 0.000000', '\\n', 'Test adaptation loss mean\n(frozen): 0.000000', '\\n', 'Test accuracy (entropy): 0.444286', '\\n', 'Test\nstability-adjusted accuracy (entropy): 0.430584', '\\n', 'Test adaptation\nfrequency (entropy): 1.000000', '\\n', 'Test adaptation loss mean (entropy):\n0.045018', '\\n', 'Test accuracy (consistency): 0.817143', '\\n', 'Test stability-\nadjusted accuracy (consistency): 0.809172', '\\n', 'Test adaptation frequency\n(consistency): 0.651429', '\\n', 'Test adaptation loss mean (consistency):\n0.060290', '\\n', '\\n', 'Execution time: a moment seconds (time limit is 2\nhours).']", "['Dataset: synthetic_vlm_stream', '\\n', 'Experiment group:\nhyperparam_tuning_epochs', '\\n', 'Number of saved configurations: 2', '\\n',\n'Number of stream ground-truth labels: 700', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Configuration name: epochs_15', '\\n', 'Final\ntraining accuracy: 1.000000', '\\n', 'Best training accuracy: 1.000000', '\\n',\n'Final validation accuracy: 1.000000', '\\n', 'Best validation accuracy:\n1.000000', '\\n', 'Final training loss: 0.059357', '\\n', 'Best training loss:\n0.059357', '\\n', 'Final validation loss: 0.062449', '\\n', 'Best validation loss:\n0.062449', '\\n', '------------------------------------------------------------',\n'\\n', 'Dataset: synthetic_vlm_stream', '\\n', 'Configuration name: epochs_30',\n'\\n', 'Final training accuracy: 1.000000', '\\n', 'Best training accuracy:\n1.000000', '\\n', 'Final validation accuracy: 1.000000', '\\n', 'Best validation\naccuracy: 1.000000', '\\n', 'Final training loss: 0.044606', '\\n', 'Best training\nloss: 0.044606', '\\n', 'Final validation loss: 0.053905', '\\n', 'Best validation\nloss: 0.053905', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Configuration name: epochs_15', '\\n', 'Evaluation\nmode: frozen', '\\n', 'Training epochs: 15', '\\n', 'Best validation epoch: 15',\n'\\n', 'Best validation loss: 0.062449', '\\n', 'Selected model validation loss:\n0.062449', '\\n', 'Selected model validation accuracy: 1.000000', '\\n', 'Final\nstream accuracy: 0.682857', '\\n', 'Final stream stability-adjusted accuracy:\n0.682857', '\\n', 'Final adaptation frequency: 0.000000', '\\n', 'Final mean\nadaptation loss: 0.000000', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Configuration name: epochs_15', '\\n', 'Evaluation\nmode: entropy', '\\n', 'Training epochs: 15', '\\n', 'Best validation epoch: 15',\n'\\n', 'Best validation loss: 0.062449', '\\n', 'Selected model validation loss:\n0.062449', '\\n', 'Selected model validation accuracy: 1.000000', '\\n', 'Final\nstream accuracy: 0.444286', '\\n', 'Final stream stability-adjusted accuracy:\n0.430584', '\\n', 'Final adaptation frequency: 1.000000', '\\n', 'Final mean\nadaptation loss: 0.045018', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Configuration name: epochs_15', '\\n', 'Evaluation\nmode: consistency', '\\n', 'Training epochs: 15', '\\n', 'Best validation epoch:\n15', '\\n', 'Best validation loss: 0.062449', '\\n', 'Selected model validation\nloss: 0.062449', '\\n', 'Selected model validation accuracy: 1.000000', '\\n',\n'Final stream accuracy: 0.817143', '\\n', 'Final stream stability-adjusted\naccuracy: 0.809172', '\\n', 'Final adaptation frequency: 0.651429', '\\n', 'Final\nmean adaptation loss: 0.060290', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Configuration name: epochs_30', '\\n', 'Evaluation\nmode: frozen', '\\n', 'Training epochs: 30', '\\n', 'Best validation epoch: 30',\n'\\n', 'Best validation loss: 0.053905', '\\n', 'Selected model validation loss:\n0.053905', '\\n', 'Selected model validation accuracy: 1.000000', '\\n', 'Final\nstream accuracy: 0.681429', '\\n', 'Final stream stability-adjusted accuracy:\n0.681429', '\\n', 'Final adaptation frequency: 0.000000', '\\n', 'Final mean\nadaptation loss: 0.000000', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Configuration name: epochs_30', '\\n', 'Evaluation\nmode: entropy', '\\n', 'Training epochs: 30', '\\n', 'Best validation epoch: 30',\n'\\n', 'Best validation loss: 0.053905', '\\n', 'Selected model validation loss:\n0.053905', '\\n', 'Selected model validation accuracy: 1.000000', '\\n', 'Final\nstream accuracy: 0.448571', '\\n', 'Final stream stability-adjusted accuracy:\n0.434442', '\\n', 'Final adaptation frequency: 1.000000', '\\n', 'Final mean\nadaptation loss: 0.040544', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Configuration name: epochs_30', '\\n', 'Evaluation\nmode: consistency', '\\n', 'Training epochs: 30', '\\n', 'Best validation epoch:\n30', '\\n', 'Best validation loss: 0.053905', '\\n', 'Selected model validation\nloss: 0.053905', '\\n', 'Selected model validation accuracy: 1.000000', '\\n',\n'Final stream accuracy: 0.804286', '\\n', 'Final stream stability-adjusted\naccuracy: 0.797246', '\\n', 'Final adaptation frequency: 0.644286', '\\n', 'Final\nmean adaptation loss: 0.041855', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Training epochs: 15', '\\n', 'Best validation\nepoch: 15', '\\n', 'Best validation loss: 0.062449', '\\n', 'Selected model\nvalidation loss: 0.062449', '\\n', 'Selected model validation accuracy:\n1.000000', '\\n', 'Frozen stream accuracy: 0.682857', '\\n', 'Frozen stream\nstability-adjusted accuracy: 0.682857', '\\n', 'Entropy-adaptation stream\naccuracy: 0.444286', '\\n', 'Entropy-adaptation stream stability-adjusted\naccuracy: 0.430584', '\\n', 'Consistency-gated adaptation stream accuracy:\n0.817143', '\\n', 'Consistency-gated adaptation stream stability-adjusted\naccuracy: 0.809172', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Training epochs: 30', '\\n', 'Best validation\nepoch: 30', '\\n', 'Best validation loss: 0.053905', '\\n', 'Selected model\nvalidation loss: 0.053905', '\\n', 'Selected model validation accuracy:\n1.000000', '\\n', 'Frozen stream accuracy: 0.681429', '\\n', 'Frozen stream\nstability-adjusted accuracy: 0.681429', '\\n', 'Entropy-adaptation stream\naccuracy: 0.448571', '\\n', 'Entropy-adaptation stream stability-adjusted\naccuracy: 0.434442', '\\n', 'Consistency-gated adaptation stream accuracy:\n0.804286', '\\n', 'Consistency-gated adaptation stream stability-adjusted\naccuracy: 0.797246', '\\n',\n'------------------------------------------------------------', '\\n', 'Dataset:\nsynthetic_vlm_stream', '\\n', 'Summary metric: best configuration by validation\nloss', '\\n', 'Best-by-validation-loss training epochs: 30', '\\n', 'Best-by-\nvalidation-loss validation epoch: 30', '\\n', 'Best-by-validation-loss validation\nloss: 0.053905', '\\n', 'Best-by-validation-loss validation accuracy: 1.000000',\n'\\n', 'Best-by-validation-loss frozen stream accuracy: 0.681429', '\\n', 'Best-\nby-validation-loss entropy-adaptation stream accuracy: 0.448571', '\\n', 'Best-\nby-validation-loss consistency-gated stream accuracy: 0.804286', '\\n', 'Best-by-\nvalidation-loss consistency-gated stream stability-adjusted accuracy: 0.797246',\n'\\n', 'Summary metric: best configuration by consistency-gated stability-\nadjusted accuracy', '\\n', 'Best-by-consistency-stability-adjusted-accuracy\ntraining epochs: 15', '\\n', 'Best-by-consistency-stability-adjusted-accuracy\nvalidation epoch: 15', '\\n', 'Best-by-consistency-stability-adjusted-accuracy\nvalidation loss: 0.062449', '\\n', 'Best-by-consistency-stability-adjusted-\naccuracy validation accuracy: 1.000000', '\\n', 'Best-by-consistency-stability-\nadjusted-accuracy frozen stream accuracy: 0.682857', '\\n', 'Best-by-consistency-\nstability-adjusted-accuracy entropy-adaptation stream accuracy: 0.444286', '\\n',\n'Best-by-consistency-stability-adjusted-accuracy consistency-gated stream\naccuracy: 0.817143', '\\n', 'Best-by-consistency-stability-adjusted-accuracy\nconsistency-gated stream stability-adjusted accuracy: 0.809172', '\\n',\n'------------------------------------------------------------', '\\n', 'Execution\ntime: a moment seconds (time limit is 2 hours).']"], "parse_exc_type": [null, null], "parse_exc_info": [null, null], "parse_exc_stack": [null, null], "completed_stages": ["Stage_1", "Stage_2"], "current_stage": "Stage_2"};
+
+// Add log directory path and stage info to the tree data
+treeStructData.log_dir_path = window.location.pathname.split('/').slice(0, -1).join('/');
+treeStructData.current_stage = window.location.pathname.includes('stage_')
+  ? window.location.pathname.split('stage_')[1].split('/')[0]
+  : 'Stage_1';
+
+// Initialize background color
+window.bgColCurrent = bgCol;
+
+// Function to set background color that can be called from the console
+function setBackgroundColor(color) {
+  // Update the global color
+  updateBackgroundColor(color);
+
+  // Refresh the current sketch to apply the new background color
+  if (currentStage) {
+    startSketch(currentStage);
+  }
+}
+
+// Load all stage data and initialize the visualization
+loadAllStageData(treeStructData);
+
+    </script>
+    <title>AI Scientist-v2 Visualization</title>
+    <style>
+      body,
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background-color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      #canvas-container {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 40vw;
+        height: 100vh;
+        background-color: inherit;
+        padding-top: 40px;
+      }
+      canvas {
+        float: left;
+        height: 100vh;
+        width: 100vw;
+      }
+      #text-container {
+        float: right;
+        height: 100vh;
+        width: 50vw;
+        background-color: #282c34;
+        overflow: auto;
+      }
+      #plan {
+        /* border-left: 2px solid #282c34; */
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+      }
+      #plot_plan {
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+        white-space: pre-wrap;
+      }
+      #exec_time_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exec_time {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exc_info {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #2c1f1f;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #metrics {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+      }
+      #vlm_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #1f2c2f;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      #vlm_feedback p {
+        margin: 0.5em 0;
+        white-space: pre-wrap;
+      }
+      .datasets_successfully_tested {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      .plots-container {
+        float: right;
+        width: 50vw;
+        padding: 1rem;
+        background-color: #282c34;
+        margin-top: 1rem;
+      }
+
+      .plot-item {
+        flex: 1 1 300px;
+        max-width: 100%;
+        margin-bottom: 1rem;
+        white-space: pre-wrap;
+      }
+
+      .plot-item img {
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: block;
+      }
+
+      .metric-group {
+        margin-bottom: 20px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+
+      .metric-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+
+      .metric-table th,
+      .metric-table td {
+        padding: 8px;
+        text-align: left;
+        border: 1px solid #ddd;
+      }
+
+      .metric-table th {
+        background-color: #363b44;
+      }
+
+      /* Styles for tabs */
+      .tabs-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 49vw;
+        background-color: #000000;
+        z-index: 10;
+        display: flex;
+        padding: 0;
+      }
+
+      .tab {
+        cursor: pointer;
+        padding: 10px 15px;
+        background-color: #333;
+        color: #f2f0e7;
+        border: none;
+        outline: none;
+        transition: background-color 0.3s;
+        flex: 1;
+        text-align: center;
+      }
+
+      .tab:hover {
+        background-color: #444;
+      }
+
+      .tab.active {
+        background-color: #4c76af;
+        font-weight: bold;
+      }
+
+      .tab.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background-color: #282c34;
+      }
+
+      .tab-content {
+        display: none;
+        padding-top: 40px; /* Space for tabs */
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .stage-info {
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        margin-bottom: 10px;
+        font-size: 0.9em;
+      }
+
+      .stage-status {
+        display: inline-block;
+        padding: 3px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+        font-size: 0.8em;
+      }
+
+      .stage-status.completed {
+        background-color: #4caf50;
+      }
+
+      .stage-status.in-progress {
+        background-color: #2196f3;
+      }
+
+      .stage-status.not-started {
+        background-color: #9e9e9e;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tabs-container" id="stage-tabs">
+      <button class="tab" data-stage="Stage_1" onclick="selectStage('Stage_1')">Stage 1</button>
+      <button class="tab" data-stage="Stage_2" onclick="selectStage('Stage_2')">Stage 2</button>
+      <button class="tab" data-stage="Stage_3" onclick="selectStage('Stage_3')">Stage 3</button>
+      <button class="tab" data-stage="Stage_4" onclick="selectStage('Stage_4')">Stage 4</button>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <pre id="text-container">
+        <div id="stage-info" class="stage-info"></div>
+        <div id="plan"></div>
+        <hr>
+        <div id="exc_info"></div>
+        <hr>
+        <div id="exec_time"></div>
+        <hr>
+        <div id="exec_time_feedback"></div>
+        <hr>
+        <div id="metrics"></div>
+        <hr>
+        <div id="plot_plan"></div>
+        <hr>
+        <div class="plots-container" id="plots"></div>
+        <hr>
+        <div id="vlm_feedback"></div>
+        <hr>
+        <div id="datasets_successfully_tested"></div>
+        <hr>
+        <code id="code" class="language-python"></code>
+        <hr>
+        <code id="plot_code" class="language-python"></code>
+    </pre>
+  </body>
+</html>

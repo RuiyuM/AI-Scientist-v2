@@ -88,7 +88,26 @@ manifest = {
     "files": files,
 }
 
-with open(os.path.join(dst, "manifest.json"), "w") as handle:
+manifest_path = os.path.join(dst, "manifest.json")
+if os.path.exists(manifest_path):
+    with open(manifest_path) as handle:
+        existing = json.load(handle)
+    comparable_existing = {
+        "source_experiment_dir": existing.get("source_experiment_dir"),
+        "snapshot_dir": existing.get("snapshot_dir"),
+        "file_count": existing.get("file_count"),
+        "files": existing.get("files", []),
+    }
+    comparable_new = {
+        "source_experiment_dir": manifest["source_experiment_dir"],
+        "snapshot_dir": manifest["snapshot_dir"],
+        "file_count": manifest["file_count"],
+        "files": manifest["files"],
+    }
+    if comparable_existing == comparable_new:
+        raise SystemExit(0)
+
+with open(manifest_path, "w") as handle:
     json.dump(manifest, handle, indent=2)
 PY
 done
