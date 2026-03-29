@@ -1,5 +1,5 @@
 {
-  "timestamp_utc": "2026-03-29T01:53:14.346454+00:00",
+  "timestamp_utc": "2026-03-29T02:03:16.721018+00:00",
   "run_label": "open_llm_vlm_ttl_cl_hf-idea0",
   "gpu_count": 1,
   "max_utilization_gpu_pct": 0,
@@ -11,13 +11,8 @@
   "scientist_processes": [
     "17284 bash -c cd '/workspace/AI-Scientist-v2' && export PYTHONUNBUFFERED=1 && export ENABLE_GPU_WATCHDOG=0 && bash '/workspace/AI-Scientist-v2/scripts/run_scientist.sh' 'ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json' 'configs/bfts_llm_ttl_96gb_single_worker.yaml' '0' 2>&1 | tee '/workspace/AI-Scientist-v2/.runtime/open_llm_vlm_ttl_cl_hf-idea0.log'",
     "17286 bash /workspace/AI-Scientist-v2/scripts/run_scientist.sh ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json configs/bfts_llm_ttl_96gb_single_worker.yaml 0",
-    "17305 bash -c cd '/workspace/AI-Scientist-v2' && export PYTHONUNBUFFERED=1 && export ENABLE_GPU_WATCHDOG=0 && bash '/workspace/AI-Scientist-v2/scripts/run_scientist.sh' 'ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json' 'configs/bfts_llm_ttl_96gb_single_worker.yaml' '1' 2>&1 | tee '/workspace/AI-Scientist-v2/.runtime/open_llm_vlm_ttl_cl_hf-idea1.log'",
-    "17308 bash /workspace/AI-Scientist-v2/scripts/run_scientist.sh ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json configs/bfts_llm_ttl_96gb_single_worker.yaml 1",
     "17338 python launch_scientist_bfts.py --config configs/bfts_llm_ttl_96gb_single_worker.yaml --load_ideas ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json --idea_idx 0",
-    "17342 bash -c cd '/workspace/AI-Scientist-v2' && export PYTHONUNBUFFERED=1 && export ENABLE_GPU_WATCHDOG=0 && bash '/workspace/AI-Scientist-v2/scripts/run_scientist.sh' 'ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json' 'configs/bfts_llm_ttl_96gb_single_worker.yaml' '2' 2>&1 | tee '/workspace/AI-Scientist-v2/.runtime/open_llm_vlm_ttl_cl_hf-idea2.log'",
-    "17348 bash /workspace/AI-Scientist-v2/scripts/run_scientist.sh ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json configs/bfts_llm_ttl_96gb_single_worker.yaml 2",
-    "17362 python launch_scientist_bfts.py --config configs/bfts_llm_ttl_96gb_single_worker.yaml --load_ideas ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json --idea_idx 1",
-    "17376 python launch_scientist_bfts.py --config configs/bfts_llm_ttl_96gb_single_worker.yaml --load_ideas ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json --idea_idx 2"
+    "20830 python launch_scientist_bfts.py --config configs/bfts_llm_ttl_96gb_single_worker.yaml --load_ideas ai_scientist/ideas/open_llm_vlm_ttl_cl_hf.json --idea_idx 0"
   ],
   "compute_processes": [],
   "gpus": [
