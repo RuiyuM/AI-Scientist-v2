@@ -1,0 +1,21 @@
+{
+    "Name": "shared_low_rank_stream_adaptation",
+    "Title": "Shared Low-Rank Stream Adaptation for Continual Test-Time Learning on Hugging Face Task Sequences",
+    "Short Hypothesis": "A single shared low-rank adapter updated across a streamed sequence of related Hugging Face tasks should outperform per-sample test-time learning when shift is gradual, provided that the updates are regularized to remain close to the base model and obvious outlier batches are rejected.",
+    "Related Work": "Continual learning and test-time learning are often studied separately: continual methods usually assume repeated task exposure, while test-time adaptation often focuses on immediate per-batch gains without retaining useful structure over time. Recent adapter-based methods suggest that low-rank parameterization can make online updates cheap enough for deployment, but there is limited evidence on whether a shared online adapter helps across realistic sequences of open Hugging Face tasks. This proposal differs by explicitly comparing reset-after-task, always-carry-forward, and anchored shared-adapter strategies on text and multimodal task streams, with the goal of quantifying when memory helps and when it simply compounds errors.",
+    "Abstract": "Many realistic deployments expose open models to streams of related tasks rather than independent test examples. This raises a central question for test-time learning: should the model reset after each batch, or should it keep a memory of previous adaptation that may help on future examples? We propose to study shared low-rank stream adaptation for open LLM and VLM evaluation on Hugging Face task sequences. A frozen base model is augmented with a small adapter that can be updated online as the test stream evolves. We compare three strategies: immediate reset, naive carry-forward adaptation, and an anchored shared adapter with regularization and outlier rejection. Text sequences may include ordered streams across `allenai/ai2_arc`, `qiaojin/PubMedQA`, and subject-grouped `cais/mmlu`, while multimodal streams may include `lmms-lab/ScienceQA`, `HuggingFaceM4/ChartQA`, and document-style subsets when feasible. The study tracks stream position, forgetting, transfer, and compute cost. The goal is to determine whether a shared low-rank memory is a practical continual test-time learning mechanism or whether the safest policy remains aggressive reset. Even strong negative results would clarify the limits of online adaptation for open models under realistic compute constraints.",
+    "Experiments": [
+        "Implement a streaming evaluation loop that exposes tasks in a fixed order and records per-window performance, adaptation state, and any reset events.",
+        "Compare three online adaptation strategies: per-window reset, naive carry-forward shared adapter, and carry-forward adapter with weight anchoring plus outlier rejection.",
+        "Run text streams built from `allenai/ai2_arc`, `qiaojin/PubMedQA`, and grouped subsets of `cais/mmlu`, and run multimodal streams built from `lmms-lab/ScienceQA` and `HuggingFaceM4/ChartQA` when the VLM path is stable.",
+        "Measure transfer to the next domain, forgetting on a small replay-style probe set, total adaptation compute, and robustness to ordering changes.",
+        "Study how adapter rank, learning rate, and reset threshold affect the stability-plasticity tradeoff.",
+        "Perform failure analysis on streams where the shared adapter becomes harmful, identifying whether the issue is domain mismatch, noisy pseudo-signals, or compounding error."
+    ],
+    "Risk Factors and Limitations": [
+        "Task-sequence experiments can become expensive because every design choice interacts with ordering and reset policy.",
+        "A small probe set for measuring forgetting may bias conclusions if it is not carefully designed.",
+        "The shared adapter may mainly memorize spurious task-specific quirks instead of generalizable shift information.",
+        "Multimodal streams may be difficult to stabilize if image preprocessing or generation latency dominates the run."
+    ]
+}

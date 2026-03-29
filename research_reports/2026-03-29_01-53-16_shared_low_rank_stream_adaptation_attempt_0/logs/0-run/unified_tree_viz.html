@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Check if we're running under Live Server
+      if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+          let lastModified = '';
+
+          // Check for file changes every second
+          setInterval(async () => {
+              try {
+                  const response = await fetch(window.location.href, { method: 'HEAD' });
+                  // get a timestamp that shows when the file was last changed
+                  const currentModified = response.headers.get('last-modified');
+
+                  if (lastModified && lastModified !== currentModified) {
+                      window.location.reload();
+                  }
+
+                  lastModified = currentModified;
+              } catch (e) {
+                  console.error('Error checking for updates:', e);
+              }
+          }, 1000);
+      }
+  </script>
+    <script
+      id="p5scripttag"
+      src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"
+      integrity="sha512-uaz5GpnQoE6t5echKlX8P52czvsIGgLPcvlzfvRubLZ1Hp8JemUDnbUiAahbVtPb+jUVrNETuXvAhDDF/N3M4w=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+
+    <script>
+      const bgCol = "#FFFFFF";
+const accentCol = "#1a439e";
+
+hljs.initHighlightingOnLoad();
+
+// Function to update background color globally
+function updateBackgroundColor(color) {
+  // Update the JS variable
+  window.bgColCurrent = color;
+
+  // Update body background
+  document.body.style.backgroundColor = color;
+
+  // Update canvas container background
+  const canvasContainer = document.getElementById('canvas-container');
+  if (canvasContainer) {
+    canvasContainer.style.backgroundColor = color;
+  }
+}
+
+// Store tree data for each stage
+const stageData = {
+  Stage_1: null,
+  Stage_2: null,
+  Stage_3: null,
+  Stage_4: null
+};
+
+// Keep track of current selected stage
+let currentStage = null;
+let currentSketch = null;
+let availableStages = [];
+
+// Class definitions for nodes and edges
+class Node {
+  constructor(x, y, id, isRoot = false) {
+    this.x = x;
+    this.y = y;
+    this.id = id;
+    this.visible = isRoot; // Only root nodes are visible initially
+    this.appearProgress = 0;
+    this.popEffect = 0;
+    this.selected = false;
+    this.isRootNode = isRoot;
+  }
+
+  update() {
+    if (this.visible) {
+      // Handle the main appearance animation
+      if (this.appearProgress < 1) {
+        this.appearProgress += 0.06;
+
+        // When we reach full size, trigger the pop effect
+        if (this.appearProgress >= 1) {
+          this.appearProgress = 1; // Cap at 1
+          this.popEffect = 1; // Start the pop effect
+        }
+      }
+
+      // Handle the pop effect animation
+      if (this.popEffect > 0) {
+        this.popEffect -= 0.15; // Control how quickly it shrinks back
+        if (this.popEffect < 0) this.popEffect = 0; // Don't go negative
+      }
+    }
+  }
+
+  startAnimation() {
+    this.visible = true;
+  }
+
+  color() {
+    if (this.selected) {
+      return accentCol; // Use the global accent color variable for selected node
+    }
+    return '#4263eb'; // Default blue color
+  }
+
+  render(p5) {
+    if (this.visible) {
+      const popBonus = this.popEffect * 0.1;
+      const nodeScale = p5.map(this.appearProgress, 0, 1, 0, 1) + popBonus;
+      const alpha = p5.map(this.appearProgress, 0, 1, 0, 255);
+
+      p5.push();
+      p5.translate(this.x, this.y);
+
+      // Shadow effect
+      p5.noStroke();
+      p5.rectMode(p5.CENTER);
+
+      for (let i = 1; i <= 4; i++) {
+        p5.fill(0, 0, 0, alpha * 0.06);
+        p5.rect(i, i, 30 * nodeScale, 30 * nodeScale, 10);
+      }
+
+      // Main square - use node's color with alpha
+      let nodeColor = p5.color(this.color());
+      nodeColor.setAlpha(alpha);
+      p5.fill(nodeColor);
+      p5.rect(0, 0, 30 * nodeScale, 30 * nodeScale, 10);
+
+      // Draw checkmark icon if the node is selected
+      if (this.selected && this.appearProgress >= 1) {
+        p5.stroke(255);
+        p5.strokeWeight(2 * nodeScale);
+        p5.noFill();
+        // Draw checkmark
+        p5.beginShape();
+        p5.vertex(-8, 0);
+        p5.vertex(-3, 5);
+        p5.vertex(8, -6);
+        p5.endShape();
+      }
+
+      p5.pop();
+    }
+  }
+
+  isMouseOver(p5) {
+    return this.visible &&
+           p5.mouseX > this.x - 15 &&
+           p5.mouseX < this.x + 15 &&
+           p5.mouseY > this.y - 15 &&
+           p5.mouseY < this.y + 15;
+  }
+
+  // Connect this node to a child node
+  child(childNode) {
+    // Create an edge from this node to the child
+    let isLeft = childNode.x < this.x;
+    let isRight = childNode.x > this.x;
+    let edge = new Edge(this, childNode, isLeft, isRight);
+    return edge;
+  }
+}
+
+class Edge {
+  constructor(parent, child, isLeft, isRight) {
+    this.parent = parent;
+    this.child = child;
+    this.isLeft = isLeft;
+    this.isRight = isRight;
+    this.progress = 0;
+
+    // Calculate the midpoint where branching occurs
+    this.midY = parent.y + (child.y - parent.y) * 0.6;
+
+    // Use the actual child x-coordinate
+    // This ensures the edge will connect directly to the child node
+    this.branchX = child.x;
+  }
+
+  update() {
+    if (this.parent.visible && this.progress < 1) {
+      this.progress += 0.01; // Adjust animation speed
+    }
+    if (this.progress >= 1) {
+      this.child.visible = true;
+    }
+  }
+
+  color() {
+    return this.child.color();
+  }
+
+  render(p5) {
+    if (!this.parent.visible) return;
+
+    // Calculate path lengths
+    const verticalDist1 = this.midY - this.parent.y;
+    const horizontalDist = Math.abs(this.branchX - this.parent.x);
+    const verticalDist2 = this.child.y - this.midY;
+    const totalLength = verticalDist1 + horizontalDist + verticalDist2;
+
+    // Calculate how much of each segment to draw
+    const currentLength = totalLength * this.progress;
+
+    p5.stroke(180, 190, 205);
+    p5.strokeWeight(1.5);
+    p5.noFill();
+
+    // Always draw the first vertical segment from parent
+    if (currentLength > 0) {
+      const firstSegmentLength = Math.min(currentLength, verticalDist1);
+      const currentMidY = p5.lerp(this.parent.y, this.midY, firstSegmentLength / verticalDist1);
+      p5.line(this.parent.x, this.parent.y, this.parent.x, currentMidY);
+    }
+
+    if (currentLength > verticalDist1) {
+      // Draw second segment (horizontal)
+      const secondSegmentLength = Math.min(currentLength - verticalDist1, horizontalDist);
+      const currentBranchX = p5.lerp(this.parent.x, this.branchX, secondSegmentLength / horizontalDist);
+      p5.line(this.parent.x, this.midY, currentBranchX, this.midY);
+
+      if (currentLength > verticalDist1 + horizontalDist) {
+        // Draw third segment (vertical to child)
+        const thirdSegmentLength = currentLength - verticalDist1 - horizontalDist;
+        const currentChildY = p5.lerp(this.midY, this.child.y, thirdSegmentLength / verticalDist2);
+        p5.line(this.branchX, this.midY, this.branchX, currentChildY);
+      }
+    }
+  }
+}
+
+// Create a modified sketch for each stage
+function createTreeSketch(stageId) {
+  return function(p5) {
+    let nodes = [];
+    let edges = [];
+    let treeData = stageData[stageId];
+
+    p5.setup = function() {
+      const canvas = p5.createCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+      canvas.parent('canvas-container');
+      p5.smooth();
+      p5.frameRate(60);
+
+      if (treeData) {
+        createTreeFromData(treeData);
+      }
+    };
+
+    p5.windowResized = function() {
+      p5.resizeCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+    };
+
+    function createTreeFromData(data) {
+      // Clear existing nodes and edges
+      nodes = [];
+      edges = [];
+
+      // Add defensive checks to prevent errors
+      if (!data || !data.layout || !Array.isArray(data.layout) || !data.edges || !Array.isArray(data.edges)) {
+        console.error("Invalid tree data format:", data);
+        return; // Exit if data structure is invalid
+      }
+
+      // Find all parent nodes in edges
+      const parentNodes = new Set();
+      for (const [parentId, childId] of data.edges) {
+        parentNodes.add(parentId);
+      }
+
+      // Create nodes
+      for (let i = 0; i < data.layout.length; i++) {
+        const [nx, ny] = data.layout[i];
+        // A node is a root if it's a parent and not a child in any edge
+        const isRoot = parentNodes.has(i) && data.edges.every(edge => edge[1] !== i);
+
+        const node = new Node(
+          nx * p5.width * 0.8 + p5.width * 0.1,
+          ny * p5.height * 0.8 + p5.height * 0.1,
+          i,
+          isRoot
+        );
+        nodes.push(node);
+      }
+
+      // If no root was found, make the first parent node visible
+      if (!nodes.some(node => node.visible) && parentNodes.size > 0) {
+        // Get the first parent node
+        const firstParentId = [...parentNodes][0];
+        if (nodes[firstParentId]) {
+          nodes[firstParentId].visible = true;
+        }
+      }
+
+      // Create edges
+      for (const [parentId, childId] of data.edges) {
+        const parent = nodes[parentId];
+        const child = nodes[childId];
+        if (parent && child) { // Verify both nodes exist
+          const isLeft = child.x < parent.x;
+          const isRight = child.x > parent.x;
+          edges.push(new Edge(parent, child, isLeft, isRight));
+        }
+      }
+
+      // Select the first node by default
+      if (nodes.length > 0) {
+        nodes[0].selected = true;
+        updateNodeInfo(0);
+      }
+    }
+
+    p5.draw = function() {
+      // Use the global background color if available, otherwise use the default bgCol
+      const currentBgColor = window.bgColCurrent || bgCol;
+      p5.background(currentBgColor);
+
+      // Update and render edges
+      for (const edge of edges) {
+        edge.update();
+        edge.render(p5);
+      }
+
+      // Update and render nodes
+      for (const node of nodes) {
+        node.update();
+        node.render(p5);
+      }
+
+      // Handle mouse hover
+      p5.cursor(p5.ARROW);
+      for (const node of nodes) {
+        if (node.isMouseOver(p5)) {
+          p5.cursor(p5.HAND);
+        }
+      }
+    };
+
+    p5.mousePressed = function() {
+      // Check if any node was clicked
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].visible && nodes[i].isMouseOver(p5)) {
+          // Deselect all nodes
+          nodes.forEach(n => n.selected = false);
+          // Select the clicked node
+          nodes[i].selected = true;
+          // Update the right panel with node info
+          updateNodeInfo(i);
+          break;
+        }
+      }
+    };
+
+    function updateNodeInfo(nodeIndex) {
+      if (treeData) {
+        setNodeInfo(
+          treeData.code[nodeIndex],
+          treeData.plan[nodeIndex],
+          treeData.plot_code?.[nodeIndex],
+          treeData.plot_plan?.[nodeIndex],
+          treeData.metrics?.[nodeIndex],
+          treeData.exc_type?.[nodeIndex] || '',
+          treeData.exc_info?.[nodeIndex]?.args?.[0] || '',
+          treeData.exc_stack?.[nodeIndex] || [],
+          treeData.plots?.[nodeIndex] || [],
+          treeData.plot_analyses?.[nodeIndex] || [],
+          treeData.vlm_feedback_summary?.[nodeIndex] || '',
+          treeData.datasets_successfully_tested?.[nodeIndex] || [],
+          treeData.exec_time_feedback?.[nodeIndex] || '',
+          treeData.exec_time?.[nodeIndex] || ''
+        );
+      }
+    }
+  };
+}
+
+// Start a new p5 sketch for the given stage
+function startSketch(stageId) {
+  if (currentSketch) {
+    currentSketch.remove();
+  }
+
+  if (stageData[stageId]) {
+    currentSketch = new p5(createTreeSketch(stageId));
+
+    // Update stage info
+    const stageNumber = stageId.split('_')[1];
+    let stageDesc = '';
+    switch(stageId) {
+      case 'Stage_1': stageDesc = 'Preliminary Investigation'; break;
+      case 'Stage_2': stageDesc = 'Baseline Tuning'; break;
+      case 'Stage_3': stageDesc = 'Research Agenda Execution'; break;
+      case 'Stage_4': stageDesc = 'Ablation Studies'; break;
+    }
+
+    document.getElementById('stage-info').innerHTML =
+      `<strong>Current Stage: ${stageNumber} - ${stageDesc}</strong>`;
+  }
+}
+
+// Handle tab selection
+function selectStage(stageId) {
+  if (!stageData[stageId] || !availableStages.includes(stageId)) {
+    return; // Don't allow selection of unavailable stages
+  }
+
+  // Update active tab styles
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  document.querySelector(`.tab[data-stage="${stageId}"]`).classList.add('active');
+
+  // Start the new sketch
+  currentStage = stageId;
+  startSketch(stageId);
+}
+
+// Function to load the tree data for all stages
+async function loadAllStageData(baseTreeData) {
+  console.log("Loading stage data with base data:", baseTreeData);
+
+  // The base tree data is for the current stage
+  const currentStageId = baseTreeData.current_stage || 'Stage_1';
+
+  // Ensure base tree data is valid and has required properties
+  if (baseTreeData && baseTreeData.layout && baseTreeData.edges) {
+    stageData[currentStageId] = baseTreeData;
+    availableStages.push(currentStageId);
+    console.log(`Added current stage ${currentStageId} to available stages`);
+  } else {
+    console.warn(`Current stage ${currentStageId} data is invalid:`, baseTreeData);
+  }
+
+  // Use relative path to load other stage trees
+  const logDirPath = baseTreeData.log_dir_path || '.';
+  console.log("Log directory path:", logDirPath);
+
+  // Load data for each stage if available
+  const stageNames = ['Stage_1', 'Stage_2', 'Stage_3', 'Stage_4'];
+  const stageNames2actualNames = {
+    'Stage_1': 'stage_1_initial_implementation_1_preliminary',
+    'Stage_2': 'stage_2_baseline_tuning_1_first_attempt',
+    'Stage_3': 'stage_3_creative_research_1_first_attempt',
+    'Stage_4': 'stage_4_ablation_studies_1_first_attempt'
+    }
+
+  for (const stage of stageNames) {
+
+    if (baseTreeData.completed_stages && baseTreeData.completed_stages.includes(stage)) {
+      try {
+        console.log(`Attempting to load data for ${stage} from ${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+        const response = await fetch(`${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+
+        if (response.ok) {
+          const data = await response.json();
+
+          // Validate the loaded data
+          if (data && data.layout && data.edges) {
+            stageData[stage] = data;
+            availableStages.push(stage);
+            console.log(`Successfully loaded and validated data for ${stage}`);
+          } else {
+            console.warn(`Loaded data for ${stage} is invalid:`, data);
+          }
+        } else {
+          console.warn(`Failed to load data for ${stage} - HTTP status ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`Error loading data for ${stage}:`, error);
+      }
+    } else {
+      console.log(`Skipping stage ${stage} - not in completed stages list:`, baseTreeData.completed_stages);
+    }
+  }
+
+  // Update tab visibility based on available stages
+  updateTabVisibility();
+
+  // Start with the first available stage
+  if (availableStages.length > 0) {
+    selectStage(availableStages[0]);
+  } else {
+    console.warn("No stages available to display");
+    // Display a message in the canvas area
+    document.getElementById('canvas-container').innerHTML =
+      '<div style="padding: 20px; color: #333; text-align: center;"><h3>No valid tree data available to display</h3></div>';
+  }
+}
+
+// Update tab visibility based on available stages
+function updateTabVisibility() {
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(tab => {
+    const stageId = tab.getAttribute('data-stage');
+    if (availableStages.includes(stageId)) {
+      tab.classList.remove('disabled');
+    } else {
+      tab.classList.add('disabled');
+    }
+  });
+}
+
+// Utility function to set the node info in the right panel
+const setNodeInfo = (code, plan, plot_code, plot_plan, metrics = null, exc_type = '', exc_info = '',
+    exc_stack = [], plots = [], plot_analyses = [], vlm_feedback_summary = '',
+    datasets_successfully_tested = [], exec_time_feedback = '', exec_time = '') => {
+  const codeElm = document.getElementById("code");
+  if (codeElm) {
+    if (code) {
+      codeElm.innerHTML = hljs.highlight(code, { language: "python" }).value;
+    } else {
+      codeElm.innerHTML = '<p>No code available</p>';
+    }
+  }
+
+  const planElm = document.getElementById("plan");
+  if (planElm) {
+    if (plan) {
+      planElm.innerHTML = hljs.highlight(plan, { language: "plaintext" }).value;
+    } else {
+      planElm.innerHTML = '<p>No plan available</p>';
+    }
+  }
+
+  const plot_codeElm = document.getElementById("plot_code");
+  if (plot_codeElm) {
+    if (plot_code) {
+      plot_codeElm.innerHTML = hljs.highlight(plot_code, { language: "python" }).value;
+    } else {
+      plot_codeElm.innerHTML = '<p>No plot code available</p>';
+    }
+  }
+
+  const plot_planElm = document.getElementById("plot_plan");
+  if (plot_planElm) {
+    if (plot_plan) {
+      plot_planElm.innerHTML = hljs.highlight(plot_plan, { language: "plaintext" }).value;
+    } else {
+      plot_planElm.innerHTML = '<p>No plot plan available</p>';
+    }
+  }
+
+  const metricsElm = document.getElementById("metrics");
+  if (metricsElm) {
+      let metricsContent = `<h3>Metrics:</h3>`;
+      if (metrics && metrics.metric_names) {
+          for (const metric of metrics.metric_names) {
+              metricsContent += `<div class="metric-group">`;
+              metricsContent += `<h4>${metric.metric_name}</h4>`;
+              metricsContent += `<p><strong>Description:</strong> ${metric.description || 'N/A'}</p>`;
+              metricsContent += `<p><strong>Optimization:</strong> ${metric.lower_is_better ? 'Minimize' : 'Maximize'}</p>`;
+
+              // Create table for dataset values
+              metricsContent += `<table class="metric-table">
+                  <tr>
+                      <th>Dataset</th>
+                      <th>Final Value</th>
+                      <th>Best Value</th>
+                  </tr>`;
+
+              for (const dataPoint of metric.data) {
+                  metricsContent += `<tr>
+                      <td>${dataPoint.dataset_name}</td>
+                      <td>${dataPoint.final_value?.toFixed(4) || 'N/A'}</td>
+                      <td>${dataPoint.best_value?.toFixed(4) || 'N/A'}</td>
+                  </tr>`;
+              }
+
+              metricsContent += `</table></div>`;
+          }
+      } else if (metrics === null) {
+          metricsContent += `<p>No metrics available</p>`;
+      }
+      metricsElm.innerHTML = metricsContent;
+  }
+
+  // Add plots display
+  const plotsElm = document.getElementById("plots");
+  if (plotsElm) {
+      if (plots && plots.length > 0) {
+          let plotsContent = '';
+          plots.forEach(plotPath => {
+              plotsContent += `
+                  <div class="plot-item">
+                      <img src="${plotPath}" alt="Experiment Plot" onerror="console.error('Failed to load plot:', this.src)"/>
+                  </div>`;
+          });
+          plotsElm.innerHTML = plotsContent;
+      } else {
+          plotsElm.innerHTML = '';
+      }
+  }
+
+  // Add error info display
+  const errorElm = document.getElementById("exc_info");
+  if (errorElm) {
+    if (exc_type) {
+      let errorContent = `<h3 style="color: #ff5555">Exception Information:</h3>
+                          <p><strong>Type:</strong> ${exc_type}</p>`;
+
+      if (exc_info) {
+        errorContent += `<p><strong>Details:</strong> <pre>${JSON.stringify(exc_info, null, 2)}</pre></p>`;
+      }
+
+      if (exc_stack) {
+        errorContent += `<p><strong>Stack Trace:</strong> <pre>${exc_stack.join('\n')}</pre></p>`;
+      }
+
+      errorElm.innerHTML = errorContent;
+    } else {
+      errorElm.innerHTML = "No exception info available";
+    }
+  }
+
+  const exec_timeElm = document.getElementById("exec_time");
+  if (exec_timeElm) {
+    let exec_timeContent = '<div id="exec_time"><h3>Execution Time (in seconds):</h3><p>' + exec_time + '</p></div>';
+    exec_timeElm.innerHTML = exec_timeContent;
+  }
+
+  const exec_time_feedbackElm = document.getElementById("exec_time_feedback");
+  if (exec_time_feedbackElm) {
+    let exec_time_feedbackContent = '<div id="exec_time_feedback_content">'
+    exec_time_feedbackContent += '<h3>Execution Time Feedback:</h3>'
+    exec_time_feedbackContent += '<p>' + exec_time_feedback + '</p>'
+    exec_time_feedbackContent += '</div>';
+    exec_time_feedbackElm.innerHTML = exec_time_feedbackContent;
+  }
+
+  const vlm_feedbackElm = document.getElementById("vlm_feedback");
+  if (vlm_feedbackElm) {
+      let vlm_feedbackContent = '';
+
+      if (plot_analyses && plot_analyses.length > 0) {
+          vlm_feedbackContent += `<h3>Plot Analysis:</h3>`;
+          plot_analyses.forEach(analysis => {
+              if (analysis && analysis.plot_path) {  // Add null check
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <h4>Analysis for ${analysis.plot_path.split('/').pop()}</h4>
+                          <p>${analysis.analysis || 'No analysis available'}</p>
+                          <ul class="key-findings">
+                              ${(analysis.key_findings || []).map(finding => `<li>${finding}</li>`).join('')}
+                          </ul>
+                      </div>`;
+              } else {
+                  console.warn('Received invalid plot analysis:', analysis);
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <p>Invalid plot analysis data received</p>
+                      </div>`;
+              }
+          });
+      }
+
+      // Add actionable insights if available
+      if (vlm_feedback_summary && typeof vlm_feedback_summary === 'string') {
+          vlm_feedbackContent += `
+              <div class="vlm_feedback">
+                  <h3>VLM Feedback Summary:</h3>
+                  <p>${vlm_feedback_summary}</p>
+              </div>`;
+      }
+
+      console.log("Datasets successfully tested:", datasets_successfully_tested);
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          vlm_feedbackContent += `
+              <div id="datasets_successfully_tested">
+                  <h3>Datasets Successfully Tested:</h3>
+                  <p>${datasets_successfully_tested.join(', ')}</p>
+              </div>`;
+      }
+
+      if (!vlm_feedbackContent) {
+          vlm_feedbackContent = '<p>No insights available for this experiment.</p>';
+      }
+
+      vlm_feedbackElm.innerHTML = vlm_feedbackContent;
+  }
+
+  const datasets_successfully_testedElm = document.getElementById("datasets_successfully_tested");
+  if (datasets_successfully_testedElm) {
+      let datasets_successfully_testedContent = '';
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          datasets_successfully_testedContent = `<h3>Datasets Successfully Tested:</h3><ul>`;
+          datasets_successfully_tested.forEach(dataset => {
+              datasets_successfully_testedContent += `<li>${dataset}</li>`;
+          });
+          datasets_successfully_testedContent += `</ul>`;
+      } else {
+          datasets_successfully_testedContent = '<p>No datasets tested yet</p>';
+      }
+      datasets_successfully_testedElm.innerHTML = datasets_successfully_testedContent;
+  }
+};
+
+// Initialize with the provided tree data
+const treeStructData = {"edges": [[0, 1]], "layout": [[0.5, 0.0], [0.5, 1.0]], "plan": ["I\u2019ll implement a compact continual test-time learning baseline on a synthetic\nsequence of related multiple-choice text tasks, which is sufficient to test\nreset versus carry-forward versus anchored shared low-rank adaptation without\ndepending on heavy external models. The base classifier is a frozen MLP, and\nadaptation is done only through a trainable low-rank residual layer, mimicking a\nlightweight adapter. I will generate three ordered tasks with gradual\ndistribution shift so that shared adaptation can plausibly help, then split each\ntask into a small source train set for base pretraining and a streamed test set\nfor online evaluation. The three strategies are: no carry (reset adapter every\nbatch), naive carry (keep updating one shared adapter), and anchored carry\n(shared adapter plus L2 anchoring to initialization and simple outlier rejection\nbased on batch loss). During base training I will print validation loss every\nepoch as required, and during streaming I will compute stream-averaged task\naccuracy. I will also save losses, metrics, predictions, and labels into\n`experiment_data` and persist them with `np.save`. Finally, I will produce a\nsmall visualization of cumulative stream accuracy over time for the three\nstrategies and save it in the working directory. This gives a simple but\ncomplete first baseline for the paper\u2019s core question about continual adaptation\nmemory.", "Seed node"], "code": ["import os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport copy\nimport numpy as np\nimport torch\nimport torch.nn as nn\nimport torch.optim as optim\nfrom torch.utils.data import TensorDataset, DataLoader\nimport matplotlib.pyplot as plt\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(7)\nnp.random.seed(7)\n\nexperiment_data = {\n    \"synthetic_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"losses\": {\"train\": [], \"val\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"timestamps\": [],\n        \"per_strategy\": {},\n    }\n}\n\n\n# ---------- Synthetic related task sequence ----------\ndef make_task(n, d, n_classes, centers, shift_scale=0.0, noise=0.8, seed=0):\n    rng = np.random.RandomState(seed)\n    X, y = [], []\n    shift = rng.randn(n_classes, d) * shift_scale\n    for i in range(n):\n        c = rng.randint(0, n_classes)\n        feat = centers[c] + shift[c] + rng.randn(d) * noise\n        X.append(feat)\n        y.append(c)\n    X = np.asarray(X, dtype=np.float32)\n    y = np.asarray(y, dtype=np.int64)\n    return X, y\n\n\nd, n_classes = 20, 4\nbase_centers = np.random.randn(n_classes, d).astype(np.float32) * 2.0\n\ntasks = []\nfor t, s in enumerate([0.0, 0.6, 1.2]):\n    X_train, y_train = make_task(\n        1000, d, n_classes, base_centers, shift_scale=s, noise=0.9, seed=10 + t\n    )\n    X_stream, y_stream = make_task(\n        300, d, n_classes, base_centers, shift_scale=s, noise=1.0, seed=30 + t\n    )\n    tasks.append(\n        {\n            \"train\": (X_train, y_train),\n            \"stream\": (X_stream, y_stream),\n            \"name\": f\"task_{t}\",\n        }\n    )\n\n# Global normalization from source train data\nall_train_X = np.concatenate([t[\"train\"][0] for t in tasks], axis=0)\nmean = all_train_X.mean(0, keepdims=True)\nstd = all_train_X.std(0, keepdims=True) + 1e-6\n\n\ndef norm(x):\n    return (x - mean) / std\n\n\ntrain_X = np.concatenate([norm(t[\"train\"][0]) for t in tasks], axis=0)\ntrain_y = np.concatenate([t[\"train\"][1] for t in tasks], axis=0)\n\n# Split train/val\nperm = np.random.permutation(len(train_X))\nsplit = int(0.85 * len(train_X))\ntr_idx, va_idx = perm[:split], perm[split:]\nX_tr = torch.tensor(train_X[tr_idx], dtype=torch.float32)\ny_tr = torch.tensor(train_y[tr_idx], dtype=torch.long)\nX_va = torch.tensor(train_X[va_idx], dtype=torch.float32)\ny_va = torch.tensor(train_y[va_idx], dtype=torch.long)\n\ntrain_loader = DataLoader(TensorDataset(X_tr, y_tr), batch_size=64, shuffle=True)\nval_loader = DataLoader(TensorDataset(X_va, y_va), batch_size=128, shuffle=False)\n\n\n# ---------- Model ----------\nclass LowRankAdapter(nn.Module):\n    def __init__(self, dim, rank=4):\n        super().__init__()\n        self.A = nn.Parameter(torch.zeros(dim, rank))\n        self.B = nn.Parameter(torch.zeros(rank, dim))\n        nn.init.normal_(self.A, std=0.02)\n        nn.init.normal_(self.B, std=0.02)\n\n    def forward(self, x):\n        return x + x @ self.A @ self.B\n\n\nclass ClassifierWithAdapter(nn.Module):\n    def __init__(self, dim, hidden, n_classes, rank=4):\n        super().__init__()\n        self.adapter = LowRankAdapter(dim, rank)\n        self.base = nn.Sequential(\n            nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, n_classes)\n        )\n\n    def forward(self, x):\n        x = self.adapter(x)\n        return self.base(x)\n\n\nmodel = ClassifierWithAdapter(d, 64, n_classes, rank=4).to(device)\ncriterion = nn.CrossEntropyLoss()\n\n# ---------- Base training: freeze adapter, train base ----------\nfor p in model.adapter.parameters():\n    p.requires_grad = False\noptimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=1e-3)\n\nbest_state = None\nbest_val = 1e9\nfor epoch in range(1, 11):\n    model.train()\n    running_loss, running_acc, n_seen = 0.0, 0.0, 0\n    for xb, yb in train_loader:\n        batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n        optimizer.zero_grad()\n        logits = model(batch[\"x\"])\n        loss = criterion(logits, batch[\"y\"])\n        loss.backward()\n        optimizer.step()\n        preds = logits.argmax(1)\n        running_loss += loss.item() * len(batch[\"y\"])\n        running_acc += (preds == batch[\"y\"]).float().sum().item()\n        n_seen += len(batch[\"y\"])\n    train_loss = running_loss / n_seen\n    train_acc = running_acc / n_seen\n\n    model.eval()\n    val_loss_sum, val_acc_sum, val_n = 0.0, 0.0, 0\n    with torch.no_grad():\n        for xb, yb in val_loader:\n            batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n            logits = model(batch[\"x\"])\n            loss = criterion(logits, batch[\"y\"])\n            preds = logits.argmax(1)\n            val_loss_sum += loss.item() * len(batch[\"y\"])\n            val_acc_sum += (preds == batch[\"y\"]).float().sum().item()\n            val_n += len(batch[\"y\"])\n    val_loss = val_loss_sum / val_n\n    val_acc = val_acc_sum / val_n\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n\n    experiment_data[\"synthetic_stream\"][\"metrics\"][\"train\"].append(\n        {\"epoch\": epoch, \"acc\": train_acc}\n    )\n    experiment_data[\"synthetic_stream\"][\"metrics\"][\"val\"].append(\n        {\"epoch\": epoch, \"acc\": val_acc}\n    )\n    experiment_data[\"synthetic_stream\"][\"losses\"][\"train\"].append(\n        {\"epoch\": epoch, \"loss\": train_loss}\n    )\n    experiment_data[\"synthetic_stream\"][\"losses\"][\"val\"].append(\n        {\"epoch\": epoch, \"loss\": val_loss}\n    )\n    experiment_data[\"synthetic_stream\"][\"timestamps\"].append(epoch)\n\n    if val_loss < best_val:\n        best_val = val_loss\n        best_state = copy.deepcopy(model.state_dict())\n\nmodel.load_state_dict(best_state)\n\n# ---------- Prepare adaptation versions ----------\nbase_state = copy.deepcopy(model.state_dict())\nbase_anchor_A = model.adapter.A.detach().clone()\nbase_anchor_B = model.adapter.B.detach().clone()\n\n\ndef reset_to_base(m):\n    m.load_state_dict(base_state)\n    for p in m.base.parameters():\n        p.requires_grad = False\n    for p in m.adapter.parameters():\n        p.requires_grad = True\n    return m\n\n\ndef run_stream(\n    strategy, batch_size=16, adapt_lr=0.08, anchor_lambda=1e-2, outlier_thresh=2.0\n):\n    m = ClassifierWithAdapter(d, 64, n_classes, rank=4).to(device)\n    m.load_state_dict(base_state)\n    for p in m.base.parameters():\n        p.requires_grad = False\n    for p in m.adapter.parameters():\n        p.requires_grad = True\n    opt = optim.SGD(m.adapter.parameters(), lr=adapt_lr)\n\n    preds_all, gts_all, cumulative_acc = [], [], []\n    batch_losses = []\n\n    stream_X = np.concatenate([norm(t[\"stream\"][0]) for t in tasks], axis=0)\n    stream_y = np.concatenate([t[\"stream\"][1] for t in tasks], axis=0)\n    X_tensor = torch.tensor(stream_X, dtype=torch.float32)\n    y_tensor = torch.tensor(stream_y, dtype=torch.long)\n    loader = DataLoader(\n        TensorDataset(X_tensor, y_tensor), batch_size=batch_size, shuffle=False\n    )\n\n    correct = 0\n    total = 0\n    running_loss_ref = None\n\n    for i, (xb, yb) in enumerate(loader):\n        batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n\n        if strategy == \"reset\":\n            m = reset_to_base(m)\n            opt = optim.SGD(m.adapter.parameters(), lr=adapt_lr)\n\n        m.eval()\n        with torch.no_grad():\n            logits = m(batch[\"x\"])\n            preds = logits.argmax(1)\n        preds_all.extend(preds.cpu().numpy().tolist())\n        gts_all.extend(batch[\"y\"].cpu().numpy().tolist())\n        correct += (preds == batch[\"y\"]).float().sum().item()\n        total += len(batch[\"y\"])\n        cumulative_acc.append(correct / total)\n\n        m.train()\n        opt.zero_grad()\n        logits_adapt = m(batch[\"x\"])\n        loss = criterion(logits_adapt, batch[\"y\"])\n\n        if strategy == \"anchored\":\n            reg = ((m.adapter.A - base_anchor_A.to(device)) ** 2).mean() + (\n                (m.adapter.B - base_anchor_B.to(device)) ** 2\n            ).mean()\n            total_loss = loss + anchor_lambda * reg\n            current = loss.item()\n            if running_loss_ref is None:\n                running_loss_ref = current\n            do_update = current <= outlier_thresh * running_loss_ref\n            if do_update:\n                total_loss.backward()\n                opt.step()\n                running_loss_ref = 0.9 * running_loss_ref + 0.1 * current\n        else:\n            loss.backward()\n            opt.step()\n\n        batch_losses.append(loss.item())\n\n    return {\n        \"stream_acc\": float(np.mean(np.array(preds_all) == np.array(gts_all))),\n        \"preds\": np.array(preds_all),\n        \"gts\": np.array(gts_all),\n        \"cumulative_acc\": np.array(cumulative_acc),\n        \"batch_losses\": np.array(batch_losses),\n    }\n\n\nresults = {}\nfor strategy in [\"reset\", \"carry\", \"anchored\"]:\n    key = \"carry\" if strategy == \"carry\" else strategy\n    run_key = strategy if strategy != \"carry\" else \"carry\"\n    if run_key == \"carry\":\n        res = run_stream(\"carry\")\n    else:\n        res = run_stream(run_key)\n    results[strategy] = res\n    print(f\"{strategy} Stream-Averaged Task Accuracy: {res['stream_acc']:.4f}\")\n    experiment_data[\"synthetic_stream\"][\"per_strategy\"][strategy] = {\n        \"metrics\": {\"stream_acc\": res[\"stream_acc\"]},\n        \"losses\": res[\"batch_losses\"],\n        \"predictions\": res[\"preds\"],\n        \"ground_truth\": res[\"gts\"],\n        \"cumulative_acc\": res[\"cumulative_acc\"],\n    }\n\n# Save plottable data\nexperiment_data[\"synthetic_stream\"][\"predictions\"] = results[\"anchored\"][\"preds\"]\nexperiment_data[\"synthetic_stream\"][\"ground_truth\"] = results[\"anchored\"][\"gts\"]\nexperiment_data[\"synthetic_stream\"][\"metrics\"][\"stream\"].append(\n    {\n        \"reset_acc\": results[\"reset\"][\"stream_acc\"],\n        \"carry_acc\": results[\"carry\"][\"stream_acc\"],\n        \"anchored_acc\": results[\"anchored\"][\"stream_acc\"],\n    }\n)\n\nnp.save(os.path.join(working_dir, \"reset_preds.npy\"), results[\"reset\"][\"preds\"])\nnp.save(os.path.join(working_dir, \"carry_preds.npy\"), results[\"carry\"][\"preds\"])\nnp.save(os.path.join(working_dir, \"anchored_preds.npy\"), results[\"anchored\"][\"preds\"])\nnp.save(os.path.join(working_dir, \"ground_truth.npy\"), results[\"anchored\"][\"gts\"])\nnp.save(\n    os.path.join(working_dir, \"reset_cumulative_acc.npy\"),\n    results[\"reset\"][\"cumulative_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"carry_cumulative_acc.npy\"),\n    results[\"carry\"][\"cumulative_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"anchored_cumulative_acc.npy\"),\n    results[\"anchored\"][\"cumulative_acc\"],\n)\n\n# Visualization\nplt.figure(figsize=(8, 4))\nfor strategy, color in zip(\n    [\"reset\", \"carry\", \"anchored\"], [\"tab:blue\", \"tab:orange\", \"tab:green\"]\n):\n    plt.plot(results[strategy][\"cumulative_acc\"], label=strategy, color=color)\nplt.xlabel(\"Stream batch\")\nplt.ylabel(\"Cumulative accuracy\")\nplt.title(\"Continual Test-Time Adaptation on Synthetic Task Stream\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_stream_cumulative_accuracy.png\"), dpi=150\n)\nplt.close()\n\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\n", "# Set random seed\nimport random\nimport numpy as np\nimport torch\n\nseed = 0\nrandom.seed(seed)\nnp.random.seed(seed)\ntorch.manual_seed(seed)\nif torch.cuda.is_available():\n    torch.cuda.manual_seed(seed)\n\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport copy\nimport numpy as np\nimport torch\nimport torch.nn as nn\nimport torch.optim as optim\nfrom torch.utils.data import TensorDataset, DataLoader\nimport matplotlib.pyplot as plt\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(7)\nnp.random.seed(7)\n\nexperiment_data = {\n    \"synthetic_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"losses\": {\"train\": [], \"val\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"timestamps\": [],\n        \"per_strategy\": {},\n    }\n}\n\n\n# ---------- Synthetic related task sequence ----------\ndef make_task(n, d, n_classes, centers, shift_scale=0.0, noise=0.8, seed=0):\n    rng = np.random.RandomState(seed)\n    X, y = [], []\n    shift = rng.randn(n_classes, d) * shift_scale\n    for i in range(n):\n        c = rng.randint(0, n_classes)\n        feat = centers[c] + shift[c] + rng.randn(d) * noise\n        X.append(feat)\n        y.append(c)\n    X = np.asarray(X, dtype=np.float32)\n    y = np.asarray(y, dtype=np.int64)\n    return X, y\n\n\nd, n_classes = 20, 4\nbase_centers = np.random.randn(n_classes, d).astype(np.float32) * 2.0\n\ntasks = []\nfor t, s in enumerate([0.0, 0.6, 1.2]):\n    X_train, y_train = make_task(\n        1000, d, n_classes, base_centers, shift_scale=s, noise=0.9, seed=10 + t\n    )\n    X_stream, y_stream = make_task(\n        300, d, n_classes, base_centers, shift_scale=s, noise=1.0, seed=30 + t\n    )\n    tasks.append(\n        {\n            \"train\": (X_train, y_train),\n            \"stream\": (X_stream, y_stream),\n            \"name\": f\"task_{t}\",\n        }\n    )\n\n# Global normalization from source train data\nall_train_X = np.concatenate([t[\"train\"][0] for t in tasks], axis=0)\nmean = all_train_X.mean(0, keepdims=True)\nstd = all_train_X.std(0, keepdims=True) + 1e-6\n\n\ndef norm(x):\n    return (x - mean) / std\n\n\ntrain_X = np.concatenate([norm(t[\"train\"][0]) for t in tasks], axis=0)\ntrain_y = np.concatenate([t[\"train\"][1] for t in tasks], axis=0)\n\n# Split train/val\nperm = np.random.permutation(len(train_X))\nsplit = int(0.85 * len(train_X))\ntr_idx, va_idx = perm[:split], perm[split:]\nX_tr = torch.tensor(train_X[tr_idx], dtype=torch.float32)\ny_tr = torch.tensor(train_y[tr_idx], dtype=torch.long)\nX_va = torch.tensor(train_X[va_idx], dtype=torch.float32)\ny_va = torch.tensor(train_y[va_idx], dtype=torch.long)\n\ntrain_loader = DataLoader(TensorDataset(X_tr, y_tr), batch_size=64, shuffle=True)\nval_loader = DataLoader(TensorDataset(X_va, y_va), batch_size=128, shuffle=False)\n\n\n# ---------- Model ----------\nclass LowRankAdapter(nn.Module):\n    def __init__(self, dim, rank=4):\n        super().__init__()\n        self.A = nn.Parameter(torch.zeros(dim, rank))\n        self.B = nn.Parameter(torch.zeros(rank, dim))\n        nn.init.normal_(self.A, std=0.02)\n        nn.init.normal_(self.B, std=0.02)\n\n    def forward(self, x):\n        return x + x @ self.A @ self.B\n\n\nclass ClassifierWithAdapter(nn.Module):\n    def __init__(self, dim, hidden, n_classes, rank=4):\n        super().__init__()\n        self.adapter = LowRankAdapter(dim, rank)\n        self.base = nn.Sequential(\n            nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, n_classes)\n        )\n\n    def forward(self, x):\n        x = self.adapter(x)\n        return self.base(x)\n\n\nmodel = ClassifierWithAdapter(d, 64, n_classes, rank=4).to(device)\ncriterion = nn.CrossEntropyLoss()\n\n# ---------- Base training: freeze adapter, train base ----------\nfor p in model.adapter.parameters():\n    p.requires_grad = False\noptimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=1e-3)\n\nbest_state = None\nbest_val = 1e9\nfor epoch in range(1, 11):\n    model.train()\n    running_loss, running_acc, n_seen = 0.0, 0.0, 0\n    for xb, yb in train_loader:\n        batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n        optimizer.zero_grad()\n        logits = model(batch[\"x\"])\n        loss = criterion(logits, batch[\"y\"])\n        loss.backward()\n        optimizer.step()\n        preds = logits.argmax(1)\n        running_loss += loss.item() * len(batch[\"y\"])\n        running_acc += (preds == batch[\"y\"]).float().sum().item()\n        n_seen += len(batch[\"y\"])\n    train_loss = running_loss / n_seen\n    train_acc = running_acc / n_seen\n\n    model.eval()\n    val_loss_sum, val_acc_sum, val_n = 0.0, 0.0, 0\n    with torch.no_grad():\n        for xb, yb in val_loader:\n            batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n            logits = model(batch[\"x\"])\n            loss = criterion(logits, batch[\"y\"])\n            preds = logits.argmax(1)\n            val_loss_sum += loss.item() * len(batch[\"y\"])\n            val_acc_sum += (preds == batch[\"y\"]).float().sum().item()\n            val_n += len(batch[\"y\"])\n    val_loss = val_loss_sum / val_n\n    val_acc = val_acc_sum / val_n\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n\n    experiment_data[\"synthetic_stream\"][\"metrics\"][\"train\"].append(\n        {\"epoch\": epoch, \"acc\": train_acc}\n    )\n    experiment_data[\"synthetic_stream\"][\"metrics\"][\"val\"].append(\n        {\"epoch\": epoch, \"acc\": val_acc}\n    )\n    experiment_data[\"synthetic_stream\"][\"losses\"][\"train\"].append(\n        {\"epoch\": epoch, \"loss\": train_loss}\n    )\n    experiment_data[\"synthetic_stream\"][\"losses\"][\"val\"].append(\n        {\"epoch\": epoch, \"loss\": val_loss}\n    )\n    experiment_data[\"synthetic_stream\"][\"timestamps\"].append(epoch)\n\n    if val_loss < best_val:\n        best_val = val_loss\n        best_state = copy.deepcopy(model.state_dict())\n\nmodel.load_state_dict(best_state)\n\n# ---------- Prepare adaptation versions ----------\nbase_state = copy.deepcopy(model.state_dict())\nbase_anchor_A = model.adapter.A.detach().clone()\nbase_anchor_B = model.adapter.B.detach().clone()\n\n\ndef reset_to_base(m):\n    m.load_state_dict(base_state)\n    for p in m.base.parameters():\n        p.requires_grad = False\n    for p in m.adapter.parameters():\n        p.requires_grad = True\n    return m\n\n\ndef run_stream(\n    strategy, batch_size=16, adapt_lr=0.08, anchor_lambda=1e-2, outlier_thresh=2.0\n):\n    m = ClassifierWithAdapter(d, 64, n_classes, rank=4).to(device)\n    m.load_state_dict(base_state)\n    for p in m.base.parameters():\n        p.requires_grad = False\n    for p in m.adapter.parameters():\n        p.requires_grad = True\n    opt = optim.SGD(m.adapter.parameters(), lr=adapt_lr)\n\n    preds_all, gts_all, cumulative_acc = [], [], []\n    batch_losses = []\n\n    stream_X = np.concatenate([norm(t[\"stream\"][0]) for t in tasks], axis=0)\n    stream_y = np.concatenate([t[\"stream\"][1] for t in tasks], axis=0)\n    X_tensor = torch.tensor(stream_X, dtype=torch.float32)\n    y_tensor = torch.tensor(stream_y, dtype=torch.long)\n    loader = DataLoader(\n        TensorDataset(X_tensor, y_tensor), batch_size=batch_size, shuffle=False\n    )\n\n    correct = 0\n    total = 0\n    running_loss_ref = None\n\n    for i, (xb, yb) in enumerate(loader):\n        batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n\n        if strategy == \"reset\":\n            m = reset_to_base(m)\n            opt = optim.SGD(m.adapter.parameters(), lr=adapt_lr)\n\n        m.eval()\n        with torch.no_grad():\n            logits = m(batch[\"x\"])\n            preds = logits.argmax(1)\n        preds_all.extend(preds.cpu().numpy().tolist())\n        gts_all.extend(batch[\"y\"].cpu().numpy().tolist())\n        correct += (preds == batch[\"y\"]).float().sum().item()\n        total += len(batch[\"y\"])\n        cumulative_acc.append(correct / total)\n\n        m.train()\n        opt.zero_grad()\n        logits_adapt = m(batch[\"x\"])\n        loss = criterion(logits_adapt, batch[\"y\"])\n\n        if strategy == \"anchored\":\n            reg = ((m.adapter.A - base_anchor_A.to(device)) ** 2).mean() + (\n                (m.adapter.B - base_anchor_B.to(device)) ** 2\n            ).mean()\n            total_loss = loss + anchor_lambda * reg\n            current = loss.item()\n            if running_loss_ref is None:\n                running_loss_ref = current\n            do_update = current <= outlier_thresh * running_loss_ref\n            if do_update:\n                total_loss.backward()\n                opt.step()\n                running_loss_ref = 0.9 * running_loss_ref + 0.1 * current\n        else:\n            loss.backward()\n            opt.step()\n\n        batch_losses.append(loss.item())\n\n    return {\n        \"stream_acc\": float(np.mean(np.array(preds_all) == np.array(gts_all))),\n        \"preds\": np.array(preds_all),\n        \"gts\": np.array(gts_all),\n        \"cumulative_acc\": np.array(cumulative_acc),\n        \"batch_losses\": np.array(batch_losses),\n    }\n\n\nresults = {}\nfor strategy in [\"reset\", \"carry\", \"anchored\"]:\n    key = \"carry\" if strategy == \"carry\" else strategy\n    run_key = strategy if strategy != \"carry\" else \"carry\"\n    if run_key == \"carry\":\n        res = run_stream(\"carry\")\n    else:\n        res = run_stream(run_key)\n    results[strategy] = res\n    print(f\"{strategy} Stream-Averaged Task Accuracy: {res['stream_acc']:.4f}\")\n    experiment_data[\"synthetic_stream\"][\"per_strategy\"][strategy] = {\n        \"metrics\": {\"stream_acc\": res[\"stream_acc\"]},\n        \"losses\": res[\"batch_losses\"],\n        \"predictions\": res[\"preds\"],\n        \"ground_truth\": res[\"gts\"],\n        \"cumulative_acc\": res[\"cumulative_acc\"],\n    }\n\n# Save plottable data\nexperiment_data[\"synthetic_stream\"][\"predictions\"] = results[\"anchored\"][\"preds\"]\nexperiment_data[\"synthetic_stream\"][\"ground_truth\"] = results[\"anchored\"][\"gts\"]\nexperiment_data[\"synthetic_stream\"][\"metrics\"][\"stream\"].append(\n    {\n        \"reset_acc\": results[\"reset\"][\"stream_acc\"],\n        \"carry_acc\": results[\"carry\"][\"stream_acc\"],\n        \"anchored_acc\": results[\"anchored\"][\"stream_acc\"],\n    }\n)\n\nnp.save(os.path.join(working_dir, \"reset_preds.npy\"), results[\"reset\"][\"preds\"])\nnp.save(os.path.join(working_dir, \"carry_preds.npy\"), results[\"carry\"][\"preds\"])\nnp.save(os.path.join(working_dir, \"anchored_preds.npy\"), results[\"anchored\"][\"preds\"])\nnp.save(os.path.join(working_dir, \"ground_truth.npy\"), results[\"anchored\"][\"gts\"])\nnp.save(\n    os.path.join(working_dir, \"reset_cumulative_acc.npy\"),\n    results[\"reset\"][\"cumulative_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"carry_cumulative_acc.npy\"),\n    results[\"carry\"][\"cumulative_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"anchored_cumulative_acc.npy\"),\n    results[\"anchored\"][\"cumulative_acc\"],\n)\n\n# Visualization\nplt.figure(figsize=(8, 4))\nfor strategy, color in zip(\n    [\"reset\", \"carry\", \"anchored\"], [\"tab:blue\", \"tab:orange\", \"tab:green\"]\n):\n    plt.plot(results[strategy][\"cumulative_acc\"], label=strategy, color=color)\nplt.xlabel(\"Stream batch\")\nplt.ylabel(\"Cumulative accuracy\")\nplt.title(\"Continual Test-Time Adaptation on Synthetic Task Stream\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_stream_cumulative_accuracy.png\"), dpi=150\n)\nplt.close()\n\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\n"], "term_out": ["['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 0.5312', '\\n', 'Epoch\n2: validation_loss = 0.1281', '\\n', 'Epoch 3: validation_loss = 0.0443', '\\n',\n'Epoch 4: validation_loss = 0.0230', '\\n', 'Epoch 5: validation_loss = 0.0145',\n'\\n', 'Epoch 6: validation_loss = 0.0101', '\\n', 'Epoch 7: validation_loss =\n0.0075', '\\n', 'Epoch 8: validation_loss = 0.0058', '\\n', 'Epoch 9:\nvalidation_loss = 0.0046', '\\n', 'Epoch 10: validation_loss = 0.0038', '\\n',\n'reset Stream-Averaged Task Accuracy: 1.0000', '\\n', 'carry Stream-Averaged Task\nAccuracy: 1.0000', '\\n', 'anchored Stream-Averaged Task Accuracy: 1.0000', '\\n',\n'Execution time: a second seconds (time limit is 2 hours).']", "['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 0.5312', '\\n', 'Epoch\n2: validation_loss = 0.1281', '\\n', 'Epoch 3: validation_loss = 0.0443', '\\n',\n'Epoch 4: validation_loss = 0.0230', '\\n', 'Epoch 5: validation_loss = 0.0145',\n'\\n', 'Epoch 6: validation_loss = 0.0101', '\\n', 'Epoch 7: validation_loss =\n0.0075', '\\n', 'Epoch 8: validation_loss = 0.0058', '\\n', 'Epoch 9:\nvalidation_loss = 0.0046', '\\n', 'Epoch 10: validation_loss = 0.0038', '\\n',\n'reset Stream-Averaged Task Accuracy: 1.0000', '\\n', 'carry Stream-Averaged Task\nAccuracy: 1.0000', '\\n', 'anchored Stream-Averaged Task Accuracy: 1.0000', '\\n',\n'Execution time: a second seconds (time limit is 2 hours).']"], "analysis": ["", ""], "exc_type": [null, null], "exc_info": [null, null], "exc_stack": [null, null], "exp_name": "0-run", "metrics": [{"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Final training accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Final validation accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "train loss", "lower_is_better": true, "description": "Best training loss achieved.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.004328, "best_value": 0.004328}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Best validation loss achieved.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.003794, "best_value": 0.003794}]}, {"metric_name": "reset accuracy", "lower_is_better": false, "description": "Final reset accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "carry accuracy", "lower_is_better": false, "description": "Final carry accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "anchored accuracy", "lower_is_better": false, "description": "Final anchored accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "reset stream accuracy", "lower_is_better": false, "description": "Reset stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "reset final batch adaptation loss", "lower_is_better": true, "description": "Reset final batch adaptation loss.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.041637, "best_value": 0.041637}]}, {"metric_name": "reset cumulative stream accuracy", "lower_is_better": false, "description": "Reset final cumulative stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "carry stream accuracy", "lower_is_better": false, "description": "Carry stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "carry final batch adaptation loss", "lower_is_better": true, "description": "Carry final batch adaptation loss.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.041493, "best_value": 0.041493}]}, {"metric_name": "carry cumulative stream accuracy", "lower_is_better": false, "description": "Carry final cumulative stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "anchored stream accuracy", "lower_is_better": false, "description": "Anchored stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "anchored final batch adaptation loss", "lower_is_better": true, "description": "Anchored final batch adaptation loss.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.041555, "best_value": 0.041555}]}, {"metric_name": "anchored cumulative stream accuracy", "lower_is_better": false, "description": "Anchored final cumulative stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}]}, {"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Final training accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Final validation accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "train loss", "lower_is_better": true, "description": "Best training loss achieved.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.004328, "best_value": 0.004328}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Best validation loss achieved.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.003794, "best_value": 0.003794}]}, {"metric_name": "reset accuracy", "lower_is_better": false, "description": "Final reset accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "carry accuracy", "lower_is_better": false, "description": "Final carry accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "anchored accuracy", "lower_is_better": false, "description": "Final anchored accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "reset stream accuracy", "lower_is_better": false, "description": "Reset stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "reset final batch adaptation loss", "lower_is_better": true, "description": "Reset mode final batch adaptation loss.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.041637, "best_value": 0.041637}]}, {"metric_name": "reset cumulative stream accuracy", "lower_is_better": false, "description": "Reset final cumulative stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "carry stream accuracy", "lower_is_better": false, "description": "Carry stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "carry final batch adaptation loss", "lower_is_better": true, "description": "Carry mode final batch adaptation loss.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.041493, "best_value": 0.041493}]}, {"metric_name": "carry cumulative stream accuracy", "lower_is_better": false, "description": "Carry final cumulative stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "anchored stream accuracy", "lower_is_better": false, "description": "Anchored stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "anchored final batch adaptation loss", "lower_is_better": true, "description": "Anchored mode final batch adaptation loss.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.041555, "best_value": 0.041555}]}, {"metric_name": "anchored cumulative stream accuracy", "lower_is_better": false, "description": "Anchored final cumulative stream accuracy.", "data": [{"dataset_name": "synthetic_stream", "final_value": 1.0, "best_value": 1.0}]}]}], "is_best_node": [true, false], "plots": [["../../logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_cumulative_accuracy.png", "../../logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_training_validation_accuracy.png", "../../logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_training_validation_loss.png", "../../logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_cumulative_accuracy_by_strategy.png", "../../logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_final_stream_accuracy_bar.png", "../../logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_batch_adaptation_loss_by_strategy.png", "../../logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_ground_truth_vs_predictions.png"], ["../../logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_cumulative_accuracy.png", "../../logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_training_validation_accuracy.png", "../../logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_training_validation_loss.png", "../../logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_cumulative_accuracy_by_strategy.png", "../../logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_final_stream_accuracy_bar.png", "../../logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_batch_adaptation_loss_by_strategy.png", "../../logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_ground_truth_vs_predictions.png"]], "plot_paths": [["experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_cumulative_accuracy.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_training_validation_accuracy.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_training_validation_loss.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_cumulative_accuracy_by_strategy.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_final_stream_accuracy_bar.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_batch_adaptation_loss_by_strategy.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_ground_truth_vs_predictions.png"], ["experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_cumulative_accuracy.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_training_validation_accuracy.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_training_validation_loss.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_cumulative_accuracy_by_strategy.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_final_stream_accuracy_bar.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_batch_adaptation_loss_by_strategy.png", "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_ground_truth_vs_predictions.png"]], "plot_analyses": [[{"analysis": "The continual test-time adaptation accuracy curve is completely flat at 1.0 for all stream batches, and the three strategies are visually indistinguishable. This indicates the current synthetic stream does not create measurable differences between reset, carry-forward, and anchored adaptation. As a preliminary implementation check, this is encouraging because it suggests the evaluation loop runs end-to-end without obvious instability. Scientifically, however, the result is uninformative for the main hypothesis: there is no evidence here for positive transfer from shared memory, no sign of forgetting, and no penalty for naive carry. The most likely interpretation is that the stream is too easy, the model is already solving it without meaningful adaptation, or the adaptation mechanism is not actually affecting predictions in a detectable way.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_cumulative_accuracy.png"}, {"analysis": "The training and validation accuracy curves reach 1.0 almost immediately, with validation accuracy already perfect from the start and training accuracy catching up by the second epoch. This pattern suggests the synthetic dataset is highly separable or trivial for the chosen model capacity. It is useful as a sanity check that the model can fit the task, but it also raises concern that validation is not challenging enough to diagnose generalization or adaptation quality. The fact that validation accuracy is perfect from the first epoch is especially notable: either the split is extremely easy, the train/validation distributions are nearly identical, or there may be leakage or overly simplistic synthetic generation. Before drawing any adaptation conclusions, it would be important to verify the split construction and increase task difficulty.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_training_validation_accuracy.png"}, {"analysis": "The training and validation loss curves decrease smoothly and rapidly toward zero, matching the accuracy saturation. Validation loss is consistently below training loss early on, which can happen with regularization, small-sample effects, or an easier validation subset, but in this context it further supports the idea that the problem is too easy. The optimization itself looks stable: there are no oscillations, divergence events, or signs of underfitting. As an implementation milestone, this is good. For the research objective, though, near-zero loss by a few epochs means there is little room for online adaptation strategies to differ during streaming evaluation.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_training_validation_loss.png"}, {"analysis": "The cumulative accuracy by adaptation strategy again shows exact overlap at 1.0 for reset, carry, and anchored across the entire stream. This duplicate evidence reinforces that the current benchmark is not discriminative. If the goal is to study continual test-time learning, one would expect at least some transient drops at task boundaries, some recovery behavior, or some divergence between strategies under distribution shift. None of that appears here. The result therefore supports only a narrow claim: on this synthetic stream, all strategies solve the task perfectly. It does not yet test whether shared low-rank memory is useful or harmful.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_cumulative_accuracy_by_strategy.png"}, {"analysis": "The final stream accuracy bar chart shows all three strategies finishing at exactly 1.0. This confirms there is no aggregate performance difference at the end of the stream. For a preliminary stage, this is acceptable as a correctness check, but it means the current experiment cannot justify selecting one adaptation strategy over another. If compute cost differs across strategies, then under these results the simplest or cheapest method would dominate, since accuracy is tied. To make the comparison meaningful, the next experiments should introduce gradual task drift, harder class boundaries, noisy or adversarial batches, or explicit task transitions where memory could help or hurt.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_final_stream_accuracy_bar.png"}, {"analysis": "The batch adaptation loss plot shows nontrivial variation over stream batches, including several spikes later in the stream, despite the accuracy remaining perfect. This is an interesting mismatch: the optimizer is seeing batches of varying difficulty or gradient magnitude, but these differences do not translate into errors. That suggests the model has substantial margin on the task. The increasing volatility later in the stream may indicate some shift in batch composition, but because all strategies overlap and accuracy stays at ceiling, these loss fluctuations are not yet actionable evidence of forgetting or transfer. Still, this plot is useful because it suggests the adaptation code is doing something dynamic rather than being completely inert.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_batch_adaptation_loss_by_strategy.png"}, {"analysis": "The qualitative comparison between ground-truth labels and predicted labels appears to show near-perfect alignment across the full sample range. This is consistent with the quantitative 1.0 accuracy results and supports the interpretation that the implementation is functionally correct on the toy dataset. At the same time, the figure offers little additional scientific insight because errors are essentially absent. For future iterations, a more informative qualitative plot would highlight mistakes around stream transitions, outlier batches, or subject changes, since those are the regimes where continual adaptation strategies should differ most.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_ground_truth_vs_predictions.png"}], [{"analysis": "The continual test-time adaptation plot shows all three strategies\u2014reset, carry, and anchored\u2014completely overlapping at cumulative accuracy 1.0 across the entire stream. This means the current experiment provides no evidence for or against the main hypothesis about shared low-rank memory, because there is no observable separation between strategies. For a preliminary implementation this is useful as a sanity check that the pipeline runs end-to-end, but scientifically it indicates the stream is too easy, adaptation is unnecessary, or the metric/evaluation protocol is masking differences. A key implication is that forgetting, transfer, and stability cannot be studied from this result since performance is already saturated from the start.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_cumulative_accuracy.png"}, {"analysis": "The training and validation accuracy curves reach perfect accuracy almost immediately. Training starts around 0.75 at the first epoch and jumps to 1.0 by the next epoch, while validation is already at 1.0 throughout. This is consistent with a very easy synthetic dataset or a possible train/validation similarity that makes generalization trivial. The absence of any gap between train and validation accuracy suggests no obvious overfitting, but it also means the benchmark is not challenging enough to stress continual adaptation. If this behavior is expected for a smoke test, it supports basic functional correctness; if not, it raises concern about data leakage, overly simple label rules, or insufficient distribution shift.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_training_validation_accuracy.png"}, {"analysis": "The training and validation loss curves decrease smoothly and rapidly toward nearly zero within a few epochs. Validation loss is lower than training loss early on, which can happen with regularization, small-sample noise, or an easier validation split, but in this context it further supports the interpretation that the task is extremely easy. The optimization itself appears stable\u2014there are no oscillations or divergence issues\u2014so the implementation likely trains correctly. However, because both losses approach zero so quickly, this plot again suggests that the current setup cannot reveal meaningful differences among adaptation strategies.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_training_validation_loss.png"}, {"analysis": "This cumulative accuracy by adaptation strategy plot repeats the same core finding: all methods remain exactly at 1.0 over all stream batches. As a result, naive carry-forward adaptation does not show any harmful accumulation, anchored adaptation does not show any protective benefit, and reset does not incur any penalty. For the paper\u2019s central question\u2014whether maintaining a shared low-rank adapter helps over aggressive reset\u2014this is effectively a null result caused by task saturation rather than a substantive negative finding. The next experimental priority should be increasing stream difficulty, introducing task transitions or gradual shift, and measuring per-task or per-boundary effects instead of only cumulative averages.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_cumulative_accuracy_by_strategy.png"}, {"analysis": "The final stream accuracy bar chart shows identical final accuracy of 1.0 for reset, carry, and anchored strategies. This confirms that the current benchmark cannot rank methods. As a summary figure, it is clear and consistent with the line plots, but it also compresses away any possibility of transient differences across the stream. If retained in a paper draft, this figure would mainly serve as a sanity-check baseline rather than evidence for the proposed method. More informative summaries would include accuracy around task switches, backward transfer/forgetting metrics, variance across random seeds, and compute cost per strategy.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_final_stream_accuracy_bar.png"}, {"analysis": "The batch adaptation loss plot shows small losses overall, mostly around the low hundredths, with several spikes later in the stream and a notable peak around the middle. This indicates some batches are modestly harder or induce larger updates, so the stream is not perfectly uniform at the optimization level even though accuracy remains saturated. That mismatch is interesting: the model experiences varying adaptation difficulty, but these differences do not translate into observable accuracy changes. This suggests either the classifier has enough margin to absorb these perturbations, or the evaluation metric is too coarse. These spikes could become useful once the task is made harder, since they may correspond to stream regions where anchored regularization or outlier rejection would matter.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_batch_adaptation_loss_by_strategy.png"}, {"analysis": "The qualitative comparison between ground-truth labels and predicted labels shows very close visual agreement across the sample index range. This supports the quantitative result of near-perfect or perfect accuracy and indicates the model is capturing the synthetic labeling pattern well. However, because the prediction trace appears almost indistinguishable from the ground truth, this visualization again reinforces that the current dataset is too easy for comparing continual adaptation strategies. For future iterations, a more diagnostic qualitative plot would highlight errors near task boundaries, confidence scores, or examples from batches associated with the adaptation-loss spikes.", "plot_path": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_ground_truth_vs_predictions.png"}]], "vlm_feedback_summary": ["The uploaded figures show a synthetic continual test-time adaptation pipeline\nthat is functionally working but currently too easy or degenerate to support\nconclusions about adaptation strategy. Training/validation curves rapidly\nsaturate at perfect accuracy with near-zero loss. All three adaptation\nstrategies (reset, carry, anchored) have identical cumulative and final stream\naccuracy of 1.0 across the full stream, while batch adaptation loss varies\nmodestly over time. The qualitative prediction plot appears to match ground\ntruth almost exactly. Overall, the implementation seems correct on a toy\nsynthetic dataset, but the benchmark lacks difficulty and does not yet expose\ntransfer, forgetting, or robustness differences needed for the proposed paper.", "The plots show a synthetic-stream preliminary implementation that appears to\nsolve the task almost perfectly. Training/validation curves saturate at 100%\nvery quickly, cumulative stream accuracy is flat at 1.0 for all three\nstrategies, final strategy accuracies are identical, batch adaptation losses are\nsmall with occasional spikes, and the qualitative prediction plot visually\nmatches ground truth closely. Overall, these results suggest the current setup\nis too easy or the evaluation is not sensitive enough to distinguish reset,\ncarry, and anchored adaptation."], "exec_time": [1.3016538619995117, 1.395988941192627], "exec_time_feedback": ["", ""], "datasets_successfully_tested": [["synthetic_stream"], ["synthetic_stream"]], "plot_code": ["import matplotlib.pyplot as plt\nimport numpy as np\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nexp = None\ntry:\n    exp = np.load(\n        os.path.join(working_dir, \"experiment_data.npy\"), allow_pickle=True\n    ).item()\n    print(\"Loaded experiment_data.npy\")\nexcept Exception as e:\n    print(f\"Error loading experiment data: {e}\")\n\ndataset = \"synthetic_stream\"\ndata = exp.get(dataset, {}) if isinstance(exp, dict) else {}\nper_strategy = data.get(\"per_strategy\", {})\n\n# Print metrics if available\ntry:\n    stream_metrics = data.get(\"metrics\", {}).get(\"stream\", [])\n    if stream_metrics:\n        m = stream_metrics[-1]\n        for k, v in m.items():\n            print(f\"{k}: {v:.4f}\")\nexcept Exception as e:\n    print(f\"Error printing stream metrics: {e}\")\n\ntry:\n    tr = data.get(\"metrics\", {}).get(\"train\", [])\n    va = data.get(\"metrics\", {}).get(\"val\", [])\n    if tr or va:\n        plt.figure(figsize=(8, 4))\n        if tr:\n            plt.plot(\n                [x[\"epoch\"] for x in tr], [x[\"acc\"] for x in tr], label=\"Train Accuracy\"\n            )\n        if va:\n            plt.plot(\n                [x[\"epoch\"] for x in va],\n                [x[\"acc\"] for x in va],\n                label=\"Validation Accuracy\",\n            )\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Accuracy\")\n        plt.title(\"Synthetic Stream Dataset - Training and Validation Accuracy\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset}_training_validation_accuracy.png\"),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating accuracy plot: {e}\")\n    plt.close()\n\ntry:\n    trl = data.get(\"losses\", {}).get(\"train\", [])\n    val = data.get(\"losses\", {}).get(\"val\", [])\n    if trl or val:\n        plt.figure(figsize=(8, 4))\n        if trl:\n            plt.plot(\n                [x[\"epoch\"] for x in trl], [x[\"loss\"] for x in trl], label=\"Train Loss\"\n            )\n        if val:\n            plt.plot(\n                [x[\"epoch\"] for x in val],\n                [x[\"loss\"] for x in val],\n                label=\"Validation Loss\",\n            )\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Loss\")\n        plt.title(\"Synthetic Stream Dataset - Training and Validation Loss\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset}_training_validation_loss.png\"),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating loss plot: {e}\")\n    plt.close()\n\ntry:\n    if per_strategy:\n        plt.figure(figsize=(8, 4))\n        for s in [\"reset\", \"carry\", \"anchored\"]:\n            if s in per_strategy and \"cumulative_acc\" in per_strategy[s]:\n                y = np.asarray(per_strategy[s][\"cumulative_acc\"])\n                plt.plot(np.arange(1, len(y) + 1), y, label=s)\n        plt.xlabel(\"Stream Batch\")\n        plt.ylabel(\"Cumulative Accuracy\")\n        plt.title(\n            \"Synthetic Stream Dataset - Cumulative Accuracy by Adaptation Strategy\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset}_cumulative_accuracy_by_strategy.png\"),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating cumulative accuracy plot: {e}\")\n    plt.close()\n\ntry:\n    vals, labels = [], []\n    for s in [\"reset\", \"carry\", \"anchored\"]:\n        if (\n            s in per_strategy\n            and \"metrics\" in per_strategy[s]\n            and \"stream_acc\" in per_strategy[s][\"metrics\"]\n        ):\n            labels.append(s)\n            vals.append(per_strategy[s][\"metrics\"][\"stream_acc\"])\n    if vals:\n        plt.figure(figsize=(6, 4))\n        plt.bar(labels, vals)\n        plt.ylim(0, 1)\n        plt.xlabel(\"Strategy\")\n        plt.ylabel(\"Final Stream Accuracy\")\n        plt.title(\"Synthetic Stream Dataset - Final Stream Accuracy by Strategy\")\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset}_final_stream_accuracy_bar.png\"),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating final accuracy bar plot: {e}\")\n    plt.close()\n\ntry:\n    if per_strategy:\n        plt.figure(figsize=(8, 4))\n        for s in [\"reset\", \"carry\", \"anchored\"]:\n            if s in per_strategy and \"losses\" in per_strategy[s]:\n                y = np.asarray(per_strategy[s][\"losses\"])\n                plt.plot(np.arange(1, len(y) + 1), y, label=s)\n        plt.xlabel(\"Stream Batch\")\n        plt.ylabel(\"Batch Adaptation Loss\")\n        plt.title(\"Synthetic Stream Dataset - Batch Adaptation Loss by Strategy\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset}_batch_adaptation_loss_by_strategy.png\"\n            ),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating batch loss plot: {e}\")\n    plt.close()\n\ntry:\n    gt = np.asarray(data.get(\"ground_truth\", []))\n    pred = np.asarray(data.get(\"predictions\", []))\n    if gt.size and pred.size and gt.size == pred.size:\n        n = min(len(gt), 200)\n        fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=True)\n        axes[0].plot(np.arange(n), gt[:n], marker=\"o\", linestyle=\"-\", markersize=2)\n        axes[0].set_title(\"Synthetic Stream Dataset - Left: Ground Truth\")\n        axes[0].set_xlabel(\"Sample Index\")\n        axes[0].set_ylabel(\"Class Label\")\n        axes[1].plot(\n            np.arange(n),\n            pred[:n],\n            marker=\"o\",\n            linestyle=\"-\",\n            markersize=2,\n            color=\"tab:orange\",\n        )\n        axes[1].set_title(\n            \"Synthetic Stream Dataset - Right: Generated Samples / Predicted Labels\"\n        )\n        axes[1].set_xlabel(\"Sample Index\")\n        fig.suptitle(\n            \"Synthetic Stream Dataset - Left: Ground Truth, Right: Generated Samples / Predicted Labels\"\n        )\n        fig.tight_layout()\n        fig.savefig(\n            os.path.join(working_dir, f\"{dataset}_ground_truth_vs_predictions.png\"),\n            dpi=150,\n        )\n        plt.close(fig)\nexcept Exception as e:\n    print(f\"Error creating ground truth vs predictions plot: {e}\")\n    plt.close(\"all\")\n", "import matplotlib.pyplot as plt\nimport numpy as np\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nexp = None\ntry:\n    exp = np.load(\n        os.path.join(working_dir, \"experiment_data.npy\"), allow_pickle=True\n    ).item()\n    print(\"Loaded experiment_data.npy\")\nexcept Exception as e:\n    print(f\"Error loading experiment data: {e}\")\n\ndataset = \"synthetic_stream\"\ndata = exp.get(dataset, {}) if isinstance(exp, dict) else {}\nper_strategy = data.get(\"per_strategy\", {})\n\n# Print metrics if available\ntry:\n    stream_metrics = data.get(\"metrics\", {}).get(\"stream\", [])\n    if stream_metrics:\n        m = stream_metrics[-1]\n        for k, v in m.items():\n            print(f\"{k}: {v:.4f}\")\nexcept Exception as e:\n    print(f\"Error printing stream metrics: {e}\")\n\ntry:\n    tr = data.get(\"metrics\", {}).get(\"train\", [])\n    va = data.get(\"metrics\", {}).get(\"val\", [])\n    if tr or va:\n        plt.figure(figsize=(8, 4))\n        if tr:\n            plt.plot(\n                [x[\"epoch\"] for x in tr], [x[\"acc\"] for x in tr], label=\"Train Accuracy\"\n            )\n        if va:\n            plt.plot(\n                [x[\"epoch\"] for x in va],\n                [x[\"acc\"] for x in va],\n                label=\"Validation Accuracy\",\n            )\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Accuracy\")\n        plt.title(\"Synthetic Stream Dataset - Training and Validation Accuracy\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset}_training_validation_accuracy.png\"),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating accuracy plot: {e}\")\n    plt.close()\n\ntry:\n    trl = data.get(\"losses\", {}).get(\"train\", [])\n    val = data.get(\"losses\", {}).get(\"val\", [])\n    if trl or val:\n        plt.figure(figsize=(8, 4))\n        if trl:\n            plt.plot(\n                [x[\"epoch\"] for x in trl], [x[\"loss\"] for x in trl], label=\"Train Loss\"\n            )\n        if val:\n            plt.plot(\n                [x[\"epoch\"] for x in val],\n                [x[\"loss\"] for x in val],\n                label=\"Validation Loss\",\n            )\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Loss\")\n        plt.title(\"Synthetic Stream Dataset - Training and Validation Loss\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset}_training_validation_loss.png\"),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating loss plot: {e}\")\n    plt.close()\n\ntry:\n    if per_strategy:\n        plt.figure(figsize=(8, 4))\n        for s in [\"reset\", \"carry\", \"anchored\"]:\n            if s in per_strategy and \"cumulative_acc\" in per_strategy[s]:\n                y = np.asarray(per_strategy[s][\"cumulative_acc\"])\n                plt.plot(np.arange(1, len(y) + 1), y, label=s)\n        plt.xlabel(\"Stream Batch\")\n        plt.ylabel(\"Cumulative Accuracy\")\n        plt.title(\n            \"Synthetic Stream Dataset - Cumulative Accuracy by Adaptation Strategy\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset}_cumulative_accuracy_by_strategy.png\"),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating cumulative accuracy plot: {e}\")\n    plt.close()\n\ntry:\n    vals, labels = [], []\n    for s in [\"reset\", \"carry\", \"anchored\"]:\n        if (\n            s in per_strategy\n            and \"metrics\" in per_strategy[s]\n            and \"stream_acc\" in per_strategy[s][\"metrics\"]\n        ):\n            labels.append(s)\n            vals.append(per_strategy[s][\"metrics\"][\"stream_acc\"])\n    if vals:\n        plt.figure(figsize=(6, 4))\n        plt.bar(labels, vals)\n        plt.ylim(0, 1)\n        plt.xlabel(\"Strategy\")\n        plt.ylabel(\"Final Stream Accuracy\")\n        plt.title(\"Synthetic Stream Dataset - Final Stream Accuracy by Strategy\")\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset}_final_stream_accuracy_bar.png\"),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating final accuracy bar plot: {e}\")\n    plt.close()\n\ntry:\n    if per_strategy:\n        plt.figure(figsize=(8, 4))\n        for s in [\"reset\", \"carry\", \"anchored\"]:\n            if s in per_strategy and \"losses\" in per_strategy[s]:\n                y = np.asarray(per_strategy[s][\"losses\"])\n                plt.plot(np.arange(1, len(y) + 1), y, label=s)\n        plt.xlabel(\"Stream Batch\")\n        plt.ylabel(\"Batch Adaptation Loss\")\n        plt.title(\"Synthetic Stream Dataset - Batch Adaptation Loss by Strategy\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset}_batch_adaptation_loss_by_strategy.png\"\n            ),\n            dpi=150,\n        )\n        plt.close()\nexcept Exception as e:\n    print(f\"Error creating batch loss plot: {e}\")\n    plt.close()\n\ntry:\n    gt = np.asarray(data.get(\"ground_truth\", []))\n    pred = np.asarray(data.get(\"predictions\", []))\n    if gt.size and pred.size and gt.size == pred.size:\n        n = min(len(gt), 200)\n        fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=True)\n        axes[0].plot(np.arange(n), gt[:n], marker=\"o\", linestyle=\"-\", markersize=2)\n        axes[0].set_title(\"Synthetic Stream Dataset - Left: Ground Truth\")\n        axes[0].set_xlabel(\"Sample Index\")\n        axes[0].set_ylabel(\"Class Label\")\n        axes[1].plot(\n            np.arange(n),\n            pred[:n],\n            marker=\"o\",\n            linestyle=\"-\",\n            markersize=2,\n            color=\"tab:orange\",\n        )\n        axes[1].set_title(\n            \"Synthetic Stream Dataset - Right: Generated Samples / Predicted Labels\"\n        )\n        axes[1].set_xlabel(\"Sample Index\")\n        fig.suptitle(\n            \"Synthetic Stream Dataset - Left: Ground Truth, Right: Generated Samples / Predicted Labels\"\n        )\n        fig.tight_layout()\n        fig.savefig(\n            os.path.join(working_dir, f\"{dataset}_ground_truth_vs_predictions.png\"),\n            dpi=150,\n        )\n        plt.close(fig)\nexcept Exception as e:\n    print(f\"Error creating ground truth vs predictions plot: {e}\")\n    plt.close(\"all\")\n"], "plot_plan": ["I\u2019ll load the saved experiment dictionary from the working directory, inspect the `synthetic_stream` entries, and produce only plots that correspond to data actually present. The key visualizations are training/validation accuracy over epochs, training/validation loss over epochs, cumulative stream accuracy per adaptation strategy, a bar chart of final stream accuracies, and a compact comparison of ground-truth vs predicted class labels for the anchored strategy. Each figure will be wrapped in its own `try/except`, saved with descriptive filenames that include the dataset name, and closed immediately after saving. I\u2019ll also print summary metrics when available, especially the final stream accuracies for reset, carry, and anchored strategies. For prediction visualization, I\u2019ll avoid fabricating data and simply plot the existing label sequences over sample index with a subtitle-style title describing left/right semantics where applicable. If per-strategy losses exist, I\u2019ll also plot batch adaptation losses across the stream for each strategy. The code will gracefully handle missing keys and continue creating any plots that are supported by the available arrays. All outputs will be written to `working_dir` using basic matplotlib only. This gives a concise diagnostic view of both offline training and online adaptation performance on the synthetic stream dataset.", null], "ablation_name": [null, null], "hyperparam_name": [null, null], "is_seed_node": [false, true], "is_seed_agg_node": [false, false], "parse_metrics_plan": ["I\u2019ll load `experiment_data.npy` from the required `working` directory, inspect\nthe saved dictionary structure, and then summarize the final or best metrics for\neach dataset. For epoch-based training/validation entries, I\u2019ll report final\naccuracies and the best (minimum) losses with clear labels. For stream and per-\nstrategy results, I\u2019ll print the final recorded stream accuracies and the final\ncumulative/batch-loss values where available, always prefixing output with the\ndataset name and explicit metric names.", "I\u2019ll load `experiment_data.npy` from the required `working` directory, inspect\nthe saved dictionary structure, and then summarize the final or best metrics for\neach dataset. For epoch-based training/validation entries, I\u2019ll report final\naccuracies and the best (minimum) losses with clear labels. For stream and per-\nstrategy results, I\u2019ll print the final recorded stream accuracies and the final\ncumulative/batch-loss values where available, always prefixing output with the\ndataset name and explicit metric names."], "parse_metrics_code": ["import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nexperiment_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(experiment_path, allow_pickle=True).item()\n\n\ndef safe_float(value):\n    try:\n        return float(value)\n    except Exception:\n        return value\n\n\ndef print_epoch_metric_summary(\n    dataset_name, metric_entries, value_key, metric_label, mode=\"final\", best_mode=None\n):\n    if not metric_entries:\n        return\n\n    valid_entries = [\n        entry\n        for entry in metric_entries\n        if isinstance(entry, dict) and value_key in entry\n    ]\n    if not valid_entries:\n        return\n\n    if mode == \"final\":\n        final_entry = valid_entries[-1]\n        print(f\"Dataset: {dataset_name}\")\n        print(f\"{metric_label}: {safe_float(final_entry[value_key]):.6f}\")\n\n    if best_mode == \"max\":\n        best_entry = max(valid_entries, key=lambda x: x[value_key])\n        print(f\"Dataset: {dataset_name}\")\n        print(f\"best {metric_label}: {safe_float(best_entry[value_key]):.6f}\")\n    elif best_mode == \"min\":\n        best_entry = min(valid_entries, key=lambda x: x[value_key])\n        print(f\"Dataset: {dataset_name}\")\n        print(f\"best {metric_label}: {safe_float(best_entry[value_key]):.6f}\")\n\n\ndef print_stream_metrics(dataset_name, stream_entries):\n    if not stream_entries:\n        return\n\n    final_stream_entry = stream_entries[-1]\n    if not isinstance(final_stream_entry, dict):\n        return\n\n    print(f\"Dataset: {dataset_name}\")\n    for key, value in final_stream_entry.items():\n        readable_name = key.replace(\"_\", \" \")\n        print(f\"final {readable_name}: {safe_float(value):.6f}\")\n\n\ndef print_per_strategy_metrics(dataset_name, per_strategy):\n    if not isinstance(per_strategy, dict):\n        return\n\n    for strategy_name, strategy_data in per_strategy.items():\n        if not isinstance(strategy_data, dict):\n            continue\n\n        metrics = strategy_data.get(\"metrics\", {})\n        if isinstance(metrics, dict) and \"stream_acc\" in metrics:\n            print(f\"Dataset: {dataset_name}\")\n            print(\n                f\"{strategy_name} stream accuracy: {safe_float(metrics['stream_acc']):.6f}\"\n            )\n\n        losses = strategy_data.get(\"losses\", None)\n        if losses is not None:\n            losses_arr = np.asarray(losses)\n            if losses_arr.size > 0:\n                print(f\"Dataset: {dataset_name}\")\n                print(\n                    f\"{strategy_name} final batch adaptation loss: {safe_float(losses_arr[-1]):.6f}\"\n                )\n\n        cumulative_acc = strategy_data.get(\"cumulative_acc\", None)\n        if cumulative_acc is not None:\n            cumulative_acc_arr = np.asarray(cumulative_acc)\n            if cumulative_acc_arr.size > 0:\n                print(f\"Dataset: {dataset_name}\")\n                print(\n                    f\"{strategy_name} final cumulative stream accuracy: {safe_float(cumulative_acc_arr[-1]):.6f}\"\n                )\n\n\nfor dataset_name, dataset_data in experiment_data.items():\n    if not isinstance(dataset_data, dict):\n        continue\n\n    metrics = dataset_data.get(\"metrics\", {})\n    losses = dataset_data.get(\"losses\", {})\n    per_strategy = dataset_data.get(\"per_strategy\", {})\n\n    train_metric_entries = metrics.get(\"train\", []) if isinstance(metrics, dict) else []\n    val_metric_entries = metrics.get(\"val\", []) if isinstance(metrics, dict) else []\n    stream_metric_entries = (\n        metrics.get(\"stream\", []) if isinstance(metrics, dict) else []\n    )\n\n    train_loss_entries = losses.get(\"train\", []) if isinstance(losses, dict) else []\n    val_loss_entries = losses.get(\"val\", []) if isinstance(losses, dict) else []\n\n    print_epoch_metric_summary(\n        dataset_name=dataset_name,\n        metric_entries=train_metric_entries,\n        value_key=\"acc\",\n        metric_label=\"final train accuracy\",\n        mode=\"final\",\n    )\n    print_epoch_metric_summary(\n        dataset_name=dataset_name,\n        metric_entries=val_metric_entries,\n        value_key=\"acc\",\n        metric_label=\"final validation accuracy\",\n        mode=\"final\",\n    )\n    print_epoch_metric_summary(\n        dataset_name=dataset_name,\n        metric_entries=train_loss_entries,\n        value_key=\"loss\",\n        metric_label=\"best train loss\",\n        best_mode=\"min\",\n    )\n    print_epoch_metric_summary(\n        dataset_name=dataset_name,\n        metric_entries=val_loss_entries,\n        value_key=\"loss\",\n        metric_label=\"best validation loss\",\n        best_mode=\"min\",\n    )\n\n    print_stream_metrics(dataset_name, stream_metric_entries)\n    print_per_strategy_metrics(dataset_name, per_strategy)\n", "import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nexperiment_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(experiment_path, allow_pickle=True).item()\n\n\ndef safe_float(value):\n    try:\n        return float(value)\n    except Exception:\n        return value\n\n\ndef print_epoch_metric_summary(\n    dataset_name, metric_entries, value_key, metric_label, mode=\"final\", best_mode=None\n):\n    if not metric_entries:\n        return\n\n    valid_entries = [\n        entry\n        for entry in metric_entries\n        if isinstance(entry, dict) and value_key in entry\n    ]\n    if not valid_entries:\n        return\n\n    if mode == \"final\":\n        final_entry = valid_entries[-1]\n        print(f\"Dataset: {dataset_name}\")\n        print(f\"{metric_label}: {safe_float(final_entry[value_key]):.6f}\")\n\n    if best_mode == \"max\":\n        best_entry = max(valid_entries, key=lambda x: x[value_key])\n        print(f\"Dataset: {dataset_name}\")\n        print(f\"best {metric_label}: {safe_float(best_entry[value_key]):.6f}\")\n    elif best_mode == \"min\":\n        best_entry = min(valid_entries, key=lambda x: x[value_key])\n        print(f\"Dataset: {dataset_name}\")\n        print(f\"best {metric_label}: {safe_float(best_entry[value_key]):.6f}\")\n\n\ndef print_stream_metrics(dataset_name, stream_entries):\n    if not stream_entries:\n        return\n\n    final_stream_entry = stream_entries[-1]\n    if not isinstance(final_stream_entry, dict):\n        return\n\n    print(f\"Dataset: {dataset_name}\")\n    for key, value in final_stream_entry.items():\n        readable_name = key.replace(\"_\", \" \")\n        print(f\"final {readable_name}: {safe_float(value):.6f}\")\n\n\ndef print_per_strategy_metrics(dataset_name, per_strategy):\n    if not isinstance(per_strategy, dict):\n        return\n\n    for strategy_name, strategy_data in per_strategy.items():\n        if not isinstance(strategy_data, dict):\n            continue\n\n        metrics = strategy_data.get(\"metrics\", {})\n        if isinstance(metrics, dict) and \"stream_acc\" in metrics:\n            print(f\"Dataset: {dataset_name}\")\n            print(\n                f\"{strategy_name} stream accuracy: {safe_float(metrics['stream_acc']):.6f}\"\n            )\n\n        losses = strategy_data.get(\"losses\", None)\n        if losses is not None:\n            losses_arr = np.asarray(losses)\n            if losses_arr.size > 0:\n                print(f\"Dataset: {dataset_name}\")\n                print(\n                    f\"{strategy_name} final batch adaptation loss: {safe_float(losses_arr[-1]):.6f}\"\n                )\n\n        cumulative_acc = strategy_data.get(\"cumulative_acc\", None)\n        if cumulative_acc is not None:\n            cumulative_acc_arr = np.asarray(cumulative_acc)\n            if cumulative_acc_arr.size > 0:\n                print(f\"Dataset: {dataset_name}\")\n                print(\n                    f\"{strategy_name} final cumulative stream accuracy: {safe_float(cumulative_acc_arr[-1]):.6f}\"\n                )\n\n\nfor dataset_name, dataset_data in experiment_data.items():\n    if not isinstance(dataset_data, dict):\n        continue\n\n    metrics = dataset_data.get(\"metrics\", {})\n    losses = dataset_data.get(\"losses\", {})\n    per_strategy = dataset_data.get(\"per_strategy\", {})\n\n    train_metric_entries = metrics.get(\"train\", []) if isinstance(metrics, dict) else []\n    val_metric_entries = metrics.get(\"val\", []) if isinstance(metrics, dict) else []\n    stream_metric_entries = (\n        metrics.get(\"stream\", []) if isinstance(metrics, dict) else []\n    )\n\n    train_loss_entries = losses.get(\"train\", []) if isinstance(losses, dict) else []\n    val_loss_entries = losses.get(\"val\", []) if isinstance(losses, dict) else []\n\n    print_epoch_metric_summary(\n        dataset_name=dataset_name,\n        metric_entries=train_metric_entries,\n        value_key=\"acc\",\n        metric_label=\"final train accuracy\",\n        mode=\"final\",\n    )\n    print_epoch_metric_summary(\n        dataset_name=dataset_name,\n        metric_entries=val_metric_entries,\n        value_key=\"acc\",\n        metric_label=\"final validation accuracy\",\n        mode=\"final\",\n    )\n    print_epoch_metric_summary(\n        dataset_name=dataset_name,\n        metric_entries=train_loss_entries,\n        value_key=\"loss\",\n        metric_label=\"best train loss\",\n        best_mode=\"min\",\n    )\n    print_epoch_metric_summary(\n        dataset_name=dataset_name,\n        metric_entries=val_loss_entries,\n        value_key=\"loss\",\n        metric_label=\"best validation loss\",\n        best_mode=\"min\",\n    )\n\n    print_stream_metrics(dataset_name, stream_metric_entries)\n    print_per_strategy_metrics(dataset_name, per_strategy)\n"], "parse_term_out": ["['Dataset: synthetic_stream', '\\n', 'final train accuracy: 1.000000', '\\n',\n'Dataset: synthetic_stream', '\\n', 'final validation accuracy: 1.000000', '\\n',\n'Dataset: synthetic_stream', '\\n', 'best train loss: 0.004328', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'best best train loss: 0.004328', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'best validation loss: 0.003794', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'best best validation loss: 0.003794', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'final reset acc: 1.000000', '\\n', 'final carry acc:\n1.000000', '\\n', 'final anchored acc: 1.000000', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'reset stream accuracy: 1.000000', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'reset final batch adaptation loss: 0.041637', '\\n',\n'Dataset: synthetic_stream', '\\n', 'reset final cumulative stream accuracy:\n1.000000', '\\n', 'Dataset: synthetic_stream', '\\n', 'carry stream accuracy:\n1.000000', '\\n', 'Dataset: synthetic_stream', '\\n', 'carry final batch\nadaptation loss: 0.041493', '\\n', 'Dataset: synthetic_stream', '\\n', 'carry\nfinal cumulative stream accuracy: 1.000000', '\\n', 'Dataset: synthetic_stream',\n'\\n', 'anchored stream accuracy: 1.000000', '\\n', 'Dataset: synthetic_stream',\n'\\n', 'anchored final batch adaptation loss: 0.041555', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'anchored final cumulative stream accuracy: 1.000000',\n'\\n', 'Execution time: a moment seconds (time limit is 2 hours).']", "['Dataset: synthetic_stream', '\\n', 'final train accuracy: 1.000000', '\\n',\n'Dataset: synthetic_stream', '\\n', 'final validation accuracy: 1.000000', '\\n',\n'Dataset: synthetic_stream', '\\n', 'best train loss: 0.004328', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'best best train loss: 0.004328', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'best validation loss: 0.003794', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'best best validation loss: 0.003794', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'final reset acc: 1.000000', '\\n', 'final carry acc:\n1.000000', '\\n', 'final anchored acc: 1.000000', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'reset stream accuracy: 1.000000', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'reset final batch adaptation loss: 0.041637', '\\n',\n'Dataset: synthetic_stream', '\\n', 'reset final cumulative stream accuracy:\n1.000000', '\\n', 'Dataset: synthetic_stream', '\\n', 'carry stream accuracy:\n1.000000', '\\n', 'Dataset: synthetic_stream', '\\n', 'carry final batch\nadaptation loss: 0.041493', '\\n', 'Dataset: synthetic_stream', '\\n', 'carry\nfinal cumulative stream accuracy: 1.000000', '\\n', 'Dataset: synthetic_stream',\n'\\n', 'anchored stream accuracy: 1.000000', '\\n', 'Dataset: synthetic_stream',\n'\\n', 'anchored final batch adaptation loss: 0.041555', '\\n', 'Dataset:\nsynthetic_stream', '\\n', 'anchored final cumulative stream accuracy: 1.000000',\n'\\n', 'Execution time: a moment seconds (time limit is 2 hours).']"], "parse_exc_type": [null, null], "parse_exc_info": [null, null], "parse_exc_stack": [null, null], "completed_stages": ["Stage_1"], "current_stage": "Stage_1"};
+
+// Add log directory path and stage info to the tree data
+treeStructData.log_dir_path = window.location.pathname.split('/').slice(0, -1).join('/');
+treeStructData.current_stage = window.location.pathname.includes('stage_')
+  ? window.location.pathname.split('stage_')[1].split('/')[0]
+  : 'Stage_1';
+
+// Initialize background color
+window.bgColCurrent = bgCol;
+
+// Function to set background color that can be called from the console
+function setBackgroundColor(color) {
+  // Update the global color
+  updateBackgroundColor(color);
+
+  // Refresh the current sketch to apply the new background color
+  if (currentStage) {
+    startSketch(currentStage);
+  }
+}
+
+// Load all stage data and initialize the visualization
+loadAllStageData(treeStructData);
+
+    </script>
+    <title>AI Scientist-v2 Visualization</title>
+    <style>
+      body,
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background-color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      #canvas-container {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 40vw;
+        height: 100vh;
+        background-color: inherit;
+        padding-top: 40px;
+      }
+      canvas {
+        float: left;
+        height: 100vh;
+        width: 100vw;
+      }
+      #text-container {
+        float: right;
+        height: 100vh;
+        width: 50vw;
+        background-color: #282c34;
+        overflow: auto;
+      }
+      #plan {
+        /* border-left: 2px solid #282c34; */
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+      }
+      #plot_plan {
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+        white-space: pre-wrap;
+      }
+      #exec_time_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exec_time {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exc_info {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #2c1f1f;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #metrics {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+      }
+      #vlm_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #1f2c2f;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      #vlm_feedback p {
+        margin: 0.5em 0;
+        white-space: pre-wrap;
+      }
+      .datasets_successfully_tested {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      .plots-container {
+        float: right;
+        width: 50vw;
+        padding: 1rem;
+        background-color: #282c34;
+        margin-top: 1rem;
+      }
+
+      .plot-item {
+        flex: 1 1 300px;
+        max-width: 100%;
+        margin-bottom: 1rem;
+        white-space: pre-wrap;
+      }
+
+      .plot-item img {
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: block;
+      }
+
+      .metric-group {
+        margin-bottom: 20px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+
+      .metric-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+
+      .metric-table th,
+      .metric-table td {
+        padding: 8px;
+        text-align: left;
+        border: 1px solid #ddd;
+      }
+
+      .metric-table th {
+        background-color: #363b44;
+      }
+
+      /* Styles for tabs */
+      .tabs-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 49vw;
+        background-color: #000000;
+        z-index: 10;
+        display: flex;
+        padding: 0;
+      }
+
+      .tab {
+        cursor: pointer;
+        padding: 10px 15px;
+        background-color: #333;
+        color: #f2f0e7;
+        border: none;
+        outline: none;
+        transition: background-color 0.3s;
+        flex: 1;
+        text-align: center;
+      }
+
+      .tab:hover {
+        background-color: #444;
+      }
+
+      .tab.active {
+        background-color: #4c76af;
+        font-weight: bold;
+      }
+
+      .tab.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background-color: #282c34;
+      }
+
+      .tab-content {
+        display: none;
+        padding-top: 40px; /* Space for tabs */
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .stage-info {
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        margin-bottom: 10px;
+        font-size: 0.9em;
+      }
+
+      .stage-status {
+        display: inline-block;
+        padding: 3px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+        font-size: 0.8em;
+      }
+
+      .stage-status.completed {
+        background-color: #4caf50;
+      }
+
+      .stage-status.in-progress {
+        background-color: #2196f3;
+      }
+
+      .stage-status.not-started {
+        background-color: #9e9e9e;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tabs-container" id="stage-tabs">
+      <button class="tab" data-stage="Stage_1" onclick="selectStage('Stage_1')">Stage 1</button>
+      <button class="tab" data-stage="Stage_2" onclick="selectStage('Stage_2')">Stage 2</button>
+      <button class="tab" data-stage="Stage_3" onclick="selectStage('Stage_3')">Stage 3</button>
+      <button class="tab" data-stage="Stage_4" onclick="selectStage('Stage_4')">Stage 4</button>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <pre id="text-container">
+        <div id="stage-info" class="stage-info"></div>
+        <div id="plan"></div>
+        <hr>
+        <div id="exc_info"></div>
+        <hr>
+        <div id="exec_time"></div>
+        <hr>
+        <div id="exec_time_feedback"></div>
+        <hr>
+        <div id="metrics"></div>
+        <hr>
+        <div id="plot_plan"></div>
+        <hr>
+        <div class="plots-container" id="plots"></div>
+        <hr>
+        <div id="vlm_feedback"></div>
+        <hr>
+        <div id="datasets_successfully_tested"></div>
+        <hr>
+        <code id="code" class="language-python"></code>
+        <hr>
+        <code id="plot_code" class="language-python"></code>
+    </pre>
+  </body>
+</html>

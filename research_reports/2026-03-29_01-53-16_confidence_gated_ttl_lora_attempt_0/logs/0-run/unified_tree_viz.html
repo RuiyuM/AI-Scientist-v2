@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Check if we're running under Live Server
+      if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+          let lastModified = '';
+
+          // Check for file changes every second
+          setInterval(async () => {
+              try {
+                  const response = await fetch(window.location.href, { method: 'HEAD' });
+                  // get a timestamp that shows when the file was last changed
+                  const currentModified = response.headers.get('last-modified');
+
+                  if (lastModified && lastModified !== currentModified) {
+                      window.location.reload();
+                  }
+
+                  lastModified = currentModified;
+              } catch (e) {
+                  console.error('Error checking for updates:', e);
+              }
+          }, 1000);
+      }
+  </script>
+    <script
+      id="p5scripttag"
+      src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"
+      integrity="sha512-uaz5GpnQoE6t5echKlX8P52czvsIGgLPcvlzfvRubLZ1Hp8JemUDnbUiAahbVtPb+jUVrNETuXvAhDDF/N3M4w=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+
+    <script>
+      const bgCol = "#FFFFFF";
+const accentCol = "#1a439e";
+
+hljs.initHighlightingOnLoad();
+
+// Function to update background color globally
+function updateBackgroundColor(color) {
+  // Update the JS variable
+  window.bgColCurrent = color;
+
+  // Update body background
+  document.body.style.backgroundColor = color;
+
+  // Update canvas container background
+  const canvasContainer = document.getElementById('canvas-container');
+  if (canvasContainer) {
+    canvasContainer.style.backgroundColor = color;
+  }
+}
+
+// Store tree data for each stage
+const stageData = {
+  Stage_1: null,
+  Stage_2: null,
+  Stage_3: null,
+  Stage_4: null
+};
+
+// Keep track of current selected stage
+let currentStage = null;
+let currentSketch = null;
+let availableStages = [];
+
+// Class definitions for nodes and edges
+class Node {
+  constructor(x, y, id, isRoot = false) {
+    this.x = x;
+    this.y = y;
+    this.id = id;
+    this.visible = isRoot; // Only root nodes are visible initially
+    this.appearProgress = 0;
+    this.popEffect = 0;
+    this.selected = false;
+    this.isRootNode = isRoot;
+  }
+
+  update() {
+    if (this.visible) {
+      // Handle the main appearance animation
+      if (this.appearProgress < 1) {
+        this.appearProgress += 0.06;
+
+        // When we reach full size, trigger the pop effect
+        if (this.appearProgress >= 1) {
+          this.appearProgress = 1; // Cap at 1
+          this.popEffect = 1; // Start the pop effect
+        }
+      }
+
+      // Handle the pop effect animation
+      if (this.popEffect > 0) {
+        this.popEffect -= 0.15; // Control how quickly it shrinks back
+        if (this.popEffect < 0) this.popEffect = 0; // Don't go negative
+      }
+    }
+  }
+
+  startAnimation() {
+    this.visible = true;
+  }
+
+  color() {
+    if (this.selected) {
+      return accentCol; // Use the global accent color variable for selected node
+    }
+    return '#4263eb'; // Default blue color
+  }
+
+  render(p5) {
+    if (this.visible) {
+      const popBonus = this.popEffect * 0.1;
+      const nodeScale = p5.map(this.appearProgress, 0, 1, 0, 1) + popBonus;
+      const alpha = p5.map(this.appearProgress, 0, 1, 0, 255);
+
+      p5.push();
+      p5.translate(this.x, this.y);
+
+      // Shadow effect
+      p5.noStroke();
+      p5.rectMode(p5.CENTER);
+
+      for (let i = 1; i <= 4; i++) {
+        p5.fill(0, 0, 0, alpha * 0.06);
+        p5.rect(i, i, 30 * nodeScale, 30 * nodeScale, 10);
+      }
+
+      // Main square - use node's color with alpha
+      let nodeColor = p5.color(this.color());
+      nodeColor.setAlpha(alpha);
+      p5.fill(nodeColor);
+      p5.rect(0, 0, 30 * nodeScale, 30 * nodeScale, 10);
+
+      // Draw checkmark icon if the node is selected
+      if (this.selected && this.appearProgress >= 1) {
+        p5.stroke(255);
+        p5.strokeWeight(2 * nodeScale);
+        p5.noFill();
+        // Draw checkmark
+        p5.beginShape();
+        p5.vertex(-8, 0);
+        p5.vertex(-3, 5);
+        p5.vertex(8, -6);
+        p5.endShape();
+      }
+
+      p5.pop();
+    }
+  }
+
+  isMouseOver(p5) {
+    return this.visible &&
+           p5.mouseX > this.x - 15 &&
+           p5.mouseX < this.x + 15 &&
+           p5.mouseY > this.y - 15 &&
+           p5.mouseY < this.y + 15;
+  }
+
+  // Connect this node to a child node
+  child(childNode) {
+    // Create an edge from this node to the child
+    let isLeft = childNode.x < this.x;
+    let isRight = childNode.x > this.x;
+    let edge = new Edge(this, childNode, isLeft, isRight);
+    return edge;
+  }
+}
+
+class Edge {
+  constructor(parent, child, isLeft, isRight) {
+    this.parent = parent;
+    this.child = child;
+    this.isLeft = isLeft;
+    this.isRight = isRight;
+    this.progress = 0;
+
+    // Calculate the midpoint where branching occurs
+    this.midY = parent.y + (child.y - parent.y) * 0.6;
+
+    // Use the actual child x-coordinate
+    // This ensures the edge will connect directly to the child node
+    this.branchX = child.x;
+  }
+
+  update() {
+    if (this.parent.visible && this.progress < 1) {
+      this.progress += 0.01; // Adjust animation speed
+    }
+    if (this.progress >= 1) {
+      this.child.visible = true;
+    }
+  }
+
+  color() {
+    return this.child.color();
+  }
+
+  render(p5) {
+    if (!this.parent.visible) return;
+
+    // Calculate path lengths
+    const verticalDist1 = this.midY - this.parent.y;
+    const horizontalDist = Math.abs(this.branchX - this.parent.x);
+    const verticalDist2 = this.child.y - this.midY;
+    const totalLength = verticalDist1 + horizontalDist + verticalDist2;
+
+    // Calculate how much of each segment to draw
+    const currentLength = totalLength * this.progress;
+
+    p5.stroke(180, 190, 205);
+    p5.strokeWeight(1.5);
+    p5.noFill();
+
+    // Always draw the first vertical segment from parent
+    if (currentLength > 0) {
+      const firstSegmentLength = Math.min(currentLength, verticalDist1);
+      const currentMidY = p5.lerp(this.parent.y, this.midY, firstSegmentLength / verticalDist1);
+      p5.line(this.parent.x, this.parent.y, this.parent.x, currentMidY);
+    }
+
+    if (currentLength > verticalDist1) {
+      // Draw second segment (horizontal)
+      const secondSegmentLength = Math.min(currentLength - verticalDist1, horizontalDist);
+      const currentBranchX = p5.lerp(this.parent.x, this.branchX, secondSegmentLength / horizontalDist);
+      p5.line(this.parent.x, this.midY, currentBranchX, this.midY);
+
+      if (currentLength > verticalDist1 + horizontalDist) {
+        // Draw third segment (vertical to child)
+        const thirdSegmentLength = currentLength - verticalDist1 - horizontalDist;
+        const currentChildY = p5.lerp(this.midY, this.child.y, thirdSegmentLength / verticalDist2);
+        p5.line(this.branchX, this.midY, this.branchX, currentChildY);
+      }
+    }
+  }
+}
+
+// Create a modified sketch for each stage
+function createTreeSketch(stageId) {
+  return function(p5) {
+    let nodes = [];
+    let edges = [];
+    let treeData = stageData[stageId];
+
+    p5.setup = function() {
+      const canvas = p5.createCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+      canvas.parent('canvas-container');
+      p5.smooth();
+      p5.frameRate(60);
+
+      if (treeData) {
+        createTreeFromData(treeData);
+      }
+    };
+
+    p5.windowResized = function() {
+      p5.resizeCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+    };
+
+    function createTreeFromData(data) {
+      // Clear existing nodes and edges
+      nodes = [];
+      edges = [];
+
+      // Add defensive checks to prevent errors
+      if (!data || !data.layout || !Array.isArray(data.layout) || !data.edges || !Array.isArray(data.edges)) {
+        console.error("Invalid tree data format:", data);
+        return; // Exit if data structure is invalid
+      }
+
+      // Find all parent nodes in edges
+      const parentNodes = new Set();
+      for (const [parentId, childId] of data.edges) {
+        parentNodes.add(parentId);
+      }
+
+      // Create nodes
+      for (let i = 0; i < data.layout.length; i++) {
+        const [nx, ny] = data.layout[i];
+        // A node is a root if it's a parent and not a child in any edge
+        const isRoot = parentNodes.has(i) && data.edges.every(edge => edge[1] !== i);
+
+        const node = new Node(
+          nx * p5.width * 0.8 + p5.width * 0.1,
+          ny * p5.height * 0.8 + p5.height * 0.1,
+          i,
+          isRoot
+        );
+        nodes.push(node);
+      }
+
+      // If no root was found, make the first parent node visible
+      if (!nodes.some(node => node.visible) && parentNodes.size > 0) {
+        // Get the first parent node
+        const firstParentId = [...parentNodes][0];
+        if (nodes[firstParentId]) {
+          nodes[firstParentId].visible = true;
+        }
+      }
+
+      // Create edges
+      for (const [parentId, childId] of data.edges) {
+        const parent = nodes[parentId];
+        const child = nodes[childId];
+        if (parent && child) { // Verify both nodes exist
+          const isLeft = child.x < parent.x;
+          const isRight = child.x > parent.x;
+          edges.push(new Edge(parent, child, isLeft, isRight));
+        }
+      }
+
+      // Select the first node by default
+      if (nodes.length > 0) {
+        nodes[0].selected = true;
+        updateNodeInfo(0);
+      }
+    }
+
+    p5.draw = function() {
+      // Use the global background color if available, otherwise use the default bgCol
+      const currentBgColor = window.bgColCurrent || bgCol;
+      p5.background(currentBgColor);
+
+      // Update and render edges
+      for (const edge of edges) {
+        edge.update();
+        edge.render(p5);
+      }
+
+      // Update and render nodes
+      for (const node of nodes) {
+        node.update();
+        node.render(p5);
+      }
+
+      // Handle mouse hover
+      p5.cursor(p5.ARROW);
+      for (const node of nodes) {
+        if (node.isMouseOver(p5)) {
+          p5.cursor(p5.HAND);
+        }
+      }
+    };
+
+    p5.mousePressed = function() {
+      // Check if any node was clicked
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].visible && nodes[i].isMouseOver(p5)) {
+          // Deselect all nodes
+          nodes.forEach(n => n.selected = false);
+          // Select the clicked node
+          nodes[i].selected = true;
+          // Update the right panel with node info
+          updateNodeInfo(i);
+          break;
+        }
+      }
+    };
+
+    function updateNodeInfo(nodeIndex) {
+      if (treeData) {
+        setNodeInfo(
+          treeData.code[nodeIndex],
+          treeData.plan[nodeIndex],
+          treeData.plot_code?.[nodeIndex],
+          treeData.plot_plan?.[nodeIndex],
+          treeData.metrics?.[nodeIndex],
+          treeData.exc_type?.[nodeIndex] || '',
+          treeData.exc_info?.[nodeIndex]?.args?.[0] || '',
+          treeData.exc_stack?.[nodeIndex] || [],
+          treeData.plots?.[nodeIndex] || [],
+          treeData.plot_analyses?.[nodeIndex] || [],
+          treeData.vlm_feedback_summary?.[nodeIndex] || '',
+          treeData.datasets_successfully_tested?.[nodeIndex] || [],
+          treeData.exec_time_feedback?.[nodeIndex] || '',
+          treeData.exec_time?.[nodeIndex] || ''
+        );
+      }
+    }
+  };
+}
+
+// Start a new p5 sketch for the given stage
+function startSketch(stageId) {
+  if (currentSketch) {
+    currentSketch.remove();
+  }
+
+  if (stageData[stageId]) {
+    currentSketch = new p5(createTreeSketch(stageId));
+
+    // Update stage info
+    const stageNumber = stageId.split('_')[1];
+    let stageDesc = '';
+    switch(stageId) {
+      case 'Stage_1': stageDesc = 'Preliminary Investigation'; break;
+      case 'Stage_2': stageDesc = 'Baseline Tuning'; break;
+      case 'Stage_3': stageDesc = 'Research Agenda Execution'; break;
+      case 'Stage_4': stageDesc = 'Ablation Studies'; break;
+    }
+
+    document.getElementById('stage-info').innerHTML =
+      `<strong>Current Stage: ${stageNumber} - ${stageDesc}</strong>`;
+  }
+}
+
+// Handle tab selection
+function selectStage(stageId) {
+  if (!stageData[stageId] || !availableStages.includes(stageId)) {
+    return; // Don't allow selection of unavailable stages
+  }
+
+  // Update active tab styles
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  document.querySelector(`.tab[data-stage="${stageId}"]`).classList.add('active');
+
+  // Start the new sketch
+  currentStage = stageId;
+  startSketch(stageId);
+}
+
+// Function to load the tree data for all stages
+async function loadAllStageData(baseTreeData) {
+  console.log("Loading stage data with base data:", baseTreeData);
+
+  // The base tree data is for the current stage
+  const currentStageId = baseTreeData.current_stage || 'Stage_1';
+
+  // Ensure base tree data is valid and has required properties
+  if (baseTreeData && baseTreeData.layout && baseTreeData.edges) {
+    stageData[currentStageId] = baseTreeData;
+    availableStages.push(currentStageId);
+    console.log(`Added current stage ${currentStageId} to available stages`);
+  } else {
+    console.warn(`Current stage ${currentStageId} data is invalid:`, baseTreeData);
+  }
+
+  // Use relative path to load other stage trees
+  const logDirPath = baseTreeData.log_dir_path || '.';
+  console.log("Log directory path:", logDirPath);
+
+  // Load data for each stage if available
+  const stageNames = ['Stage_1', 'Stage_2', 'Stage_3', 'Stage_4'];
+  const stageNames2actualNames = {
+    'Stage_1': 'stage_1_initial_implementation_1_preliminary',
+    'Stage_2': 'stage_2_baseline_tuning_1_first_attempt',
+    'Stage_3': 'stage_3_creative_research_1_first_attempt',
+    'Stage_4': 'stage_4_ablation_studies_1_first_attempt'
+    }
+
+  for (const stage of stageNames) {
+
+    if (baseTreeData.completed_stages && baseTreeData.completed_stages.includes(stage)) {
+      try {
+        console.log(`Attempting to load data for ${stage} from ${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+        const response = await fetch(`${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+
+        if (response.ok) {
+          const data = await response.json();
+
+          // Validate the loaded data
+          if (data && data.layout && data.edges) {
+            stageData[stage] = data;
+            availableStages.push(stage);
+            console.log(`Successfully loaded and validated data for ${stage}`);
+          } else {
+            console.warn(`Loaded data for ${stage} is invalid:`, data);
+          }
+        } else {
+          console.warn(`Failed to load data for ${stage} - HTTP status ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`Error loading data for ${stage}:`, error);
+      }
+    } else {
+      console.log(`Skipping stage ${stage} - not in completed stages list:`, baseTreeData.completed_stages);
+    }
+  }
+
+  // Update tab visibility based on available stages
+  updateTabVisibility();
+
+  // Start with the first available stage
+  if (availableStages.length > 0) {
+    selectStage(availableStages[0]);
+  } else {
+    console.warn("No stages available to display");
+    // Display a message in the canvas area
+    document.getElementById('canvas-container').innerHTML =
+      '<div style="padding: 20px; color: #333; text-align: center;"><h3>No valid tree data available to display</h3></div>';
+  }
+}
+
+// Update tab visibility based on available stages
+function updateTabVisibility() {
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(tab => {
+    const stageId = tab.getAttribute('data-stage');
+    if (availableStages.includes(stageId)) {
+      tab.classList.remove('disabled');
+    } else {
+      tab.classList.add('disabled');
+    }
+  });
+}
+
+// Utility function to set the node info in the right panel
+const setNodeInfo = (code, plan, plot_code, plot_plan, metrics = null, exc_type = '', exc_info = '',
+    exc_stack = [], plots = [], plot_analyses = [], vlm_feedback_summary = '',
+    datasets_successfully_tested = [], exec_time_feedback = '', exec_time = '') => {
+  const codeElm = document.getElementById("code");
+  if (codeElm) {
+    if (code) {
+      codeElm.innerHTML = hljs.highlight(code, { language: "python" }).value;
+    } else {
+      codeElm.innerHTML = '<p>No code available</p>';
+    }
+  }
+
+  const planElm = document.getElementById("plan");
+  if (planElm) {
+    if (plan) {
+      planElm.innerHTML = hljs.highlight(plan, { language: "plaintext" }).value;
+    } else {
+      planElm.innerHTML = '<p>No plan available</p>';
+    }
+  }
+
+  const plot_codeElm = document.getElementById("plot_code");
+  if (plot_codeElm) {
+    if (plot_code) {
+      plot_codeElm.innerHTML = hljs.highlight(plot_code, { language: "python" }).value;
+    } else {
+      plot_codeElm.innerHTML = '<p>No plot code available</p>';
+    }
+  }
+
+  const plot_planElm = document.getElementById("plot_plan");
+  if (plot_planElm) {
+    if (plot_plan) {
+      plot_planElm.innerHTML = hljs.highlight(plot_plan, { language: "plaintext" }).value;
+    } else {
+      plot_planElm.innerHTML = '<p>No plot plan available</p>';
+    }
+  }
+
+  const metricsElm = document.getElementById("metrics");
+  if (metricsElm) {
+      let metricsContent = `<h3>Metrics:</h3>`;
+      if (metrics && metrics.metric_names) {
+          for (const metric of metrics.metric_names) {
+              metricsContent += `<div class="metric-group">`;
+              metricsContent += `<h4>${metric.metric_name}</h4>`;
+              metricsContent += `<p><strong>Description:</strong> ${metric.description || 'N/A'}</p>`;
+              metricsContent += `<p><strong>Optimization:</strong> ${metric.lower_is_better ? 'Minimize' : 'Maximize'}</p>`;
+
+              // Create table for dataset values
+              metricsContent += `<table class="metric-table">
+                  <tr>
+                      <th>Dataset</th>
+                      <th>Final Value</th>
+                      <th>Best Value</th>
+                  </tr>`;
+
+              for (const dataPoint of metric.data) {
+                  metricsContent += `<tr>
+                      <td>${dataPoint.dataset_name}</td>
+                      <td>${dataPoint.final_value?.toFixed(4) || 'N/A'}</td>
+                      <td>${dataPoint.best_value?.toFixed(4) || 'N/A'}</td>
+                  </tr>`;
+              }
+
+              metricsContent += `</table></div>`;
+          }
+      } else if (metrics === null) {
+          metricsContent += `<p>No metrics available</p>`;
+      }
+      metricsElm.innerHTML = metricsContent;
+  }
+
+  // Add plots display
+  const plotsElm = document.getElementById("plots");
+  if (plotsElm) {
+      if (plots && plots.length > 0) {
+          let plotsContent = '';
+          plots.forEach(plotPath => {
+              plotsContent += `
+                  <div class="plot-item">
+                      <img src="${plotPath}" alt="Experiment Plot" onerror="console.error('Failed to load plot:', this.src)"/>
+                  </div>`;
+          });
+          plotsElm.innerHTML = plotsContent;
+      } else {
+          plotsElm.innerHTML = '';
+      }
+  }
+
+  // Add error info display
+  const errorElm = document.getElementById("exc_info");
+  if (errorElm) {
+    if (exc_type) {
+      let errorContent = `<h3 style="color: #ff5555">Exception Information:</h3>
+                          <p><strong>Type:</strong> ${exc_type}</p>`;
+
+      if (exc_info) {
+        errorContent += `<p><strong>Details:</strong> <pre>${JSON.stringify(exc_info, null, 2)}</pre></p>`;
+      }
+
+      if (exc_stack) {
+        errorContent += `<p><strong>Stack Trace:</strong> <pre>${exc_stack.join('\n')}</pre></p>`;
+      }
+
+      errorElm.innerHTML = errorContent;
+    } else {
+      errorElm.innerHTML = "No exception info available";
+    }
+  }
+
+  const exec_timeElm = document.getElementById("exec_time");
+  if (exec_timeElm) {
+    let exec_timeContent = '<div id="exec_time"><h3>Execution Time (in seconds):</h3><p>' + exec_time + '</p></div>';
+    exec_timeElm.innerHTML = exec_timeContent;
+  }
+
+  const exec_time_feedbackElm = document.getElementById("exec_time_feedback");
+  if (exec_time_feedbackElm) {
+    let exec_time_feedbackContent = '<div id="exec_time_feedback_content">'
+    exec_time_feedbackContent += '<h3>Execution Time Feedback:</h3>'
+    exec_time_feedbackContent += '<p>' + exec_time_feedback + '</p>'
+    exec_time_feedbackContent += '</div>';
+    exec_time_feedbackElm.innerHTML = exec_time_feedbackContent;
+  }
+
+  const vlm_feedbackElm = document.getElementById("vlm_feedback");
+  if (vlm_feedbackElm) {
+      let vlm_feedbackContent = '';
+
+      if (plot_analyses && plot_analyses.length > 0) {
+          vlm_feedbackContent += `<h3>Plot Analysis:</h3>`;
+          plot_analyses.forEach(analysis => {
+              if (analysis && analysis.plot_path) {  // Add null check
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <h4>Analysis for ${analysis.plot_path.split('/').pop()}</h4>
+                          <p>${analysis.analysis || 'No analysis available'}</p>
+                          <ul class="key-findings">
+                              ${(analysis.key_findings || []).map(finding => `<li>${finding}</li>`).join('')}
+                          </ul>
+                      </div>`;
+              } else {
+                  console.warn('Received invalid plot analysis:', analysis);
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <p>Invalid plot analysis data received</p>
+                      </div>`;
+              }
+          });
+      }
+
+      // Add actionable insights if available
+      if (vlm_feedback_summary && typeof vlm_feedback_summary === 'string') {
+          vlm_feedbackContent += `
+              <div class="vlm_feedback">
+                  <h3>VLM Feedback Summary:</h3>
+                  <p>${vlm_feedback_summary}</p>
+              </div>`;
+      }
+
+      console.log("Datasets successfully tested:", datasets_successfully_tested);
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          vlm_feedbackContent += `
+              <div id="datasets_successfully_tested">
+                  <h3>Datasets Successfully Tested:</h3>
+                  <p>${datasets_successfully_tested.join(', ')}</p>
+              </div>`;
+      }
+
+      if (!vlm_feedbackContent) {
+          vlm_feedbackContent = '<p>No insights available for this experiment.</p>';
+      }
+
+      vlm_feedbackElm.innerHTML = vlm_feedbackContent;
+  }
+
+  const datasets_successfully_testedElm = document.getElementById("datasets_successfully_tested");
+  if (datasets_successfully_testedElm) {
+      let datasets_successfully_testedContent = '';
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          datasets_successfully_testedContent = `<h3>Datasets Successfully Tested:</h3><ul>`;
+          datasets_successfully_tested.forEach(dataset => {
+              datasets_successfully_testedContent += `<li>${dataset}</li>`;
+          });
+          datasets_successfully_testedContent += `</ul>`;
+      } else {
+          datasets_successfully_testedContent = '<p>No datasets tested yet</p>';
+      }
+      datasets_successfully_testedElm.innerHTML = datasets_successfully_testedContent;
+  }
+};
+
+// Initialize with the provided tree data
+const treeStructData = {"edges": [[0, 1]], "layout": [[0.5, 0.0], [0.5, 1.0]], "plan": ["This baseline uses a small synthetic multiple-choice reasoning stream to mimic\ndistribution shift, so we can quickly test confidence-gated test-time LoRA\nwithout depending on large Hugging Face models yet. We first train a frozen\nbackbone classifier on an in-distribution text-like feature space, then evaluate\non a shifted stream where feature statistics and class rules are perturbed. The\nmodel is a simple MLP with a LoRA-style low-rank adapter on the hidden layer,\nwhich lets us isolate test-time adaptation behavior cleanly and cheaply. We\ncompare three settings: frozen inference, always-on test-time adaptation, and\nconfidence-gated adaptation triggered by high predictive entropy. Test-time\nupdates use self-training on the model\u2019s own pseudo-label for one example at a\ntime, and we periodically reset LoRA weights to reduce drift. We track\nvalidation loss during source training and then report shifted-stream accuracy\nfor all baselines, along with adaptation-trigger rates. The script also saves\nmetrics, predictions, and ground truth as numpy files and produces a plot of\ncumulative shifted-stream accuracy over time. This gives a minimal but\nfunctional scaffold that can later be swapped with real Hugging Face datasets\nand Qwen-style models while preserving the experimental logic.", "Seed node"], "code": ["import os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport copy\nimport math\nimport time\nimport numpy as np\nimport matplotlib.pyplot as plt\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nfrom torch.utils.data import Dataset, DataLoader\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(42)\nnp.random.seed(42)\n\nexperiment_data = {\n    \"synthetic_reasoning_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"test\": []},\n        \"losses\": {\"train\": [], \"val\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"timestamps\": [],\n        \"stream_results\": {},\n    }\n}\n\n\n# -----------------------\n# Synthetic dataset\n# -----------------------\nclass SyntheticReasoningDataset(Dataset):\n    def __init__(self, n=2000, d=20, shift=False):\n        self.X, self.y = self.make_data(n, d, shift)\n\n    @staticmethod\n    def make_data(n, d, shift=False):\n        X = np.random.randn(n, d).astype(np.float32)\n        if not shift:\n            s0 = X[:, :5].sum(1)\n            s1 = X[:, 5:10].sum(1)\n            y = (s1 > s0).astype(np.int64)\n        else:\n            X = (1.3 * X + 0.4).astype(np.float32)\n            s0 = 0.6 * X[:, :5].sum(1) + 0.4 * X[:, 10:15].sum(1)\n            s1 = 0.7 * X[:, 5:10].sum(1) + 0.3 * X[:, 15:20].sum(1)\n            y = (s1 > s0 + 0.2).astype(np.int64)\n        # Normalize inputs carefully for model stability\n        mu = X.mean(axis=0, keepdims=True)\n        std = X.std(axis=0, keepdims=True) + 1e-6\n        X = ((X - mu) / std).astype(np.float32)\n        return torch.tensor(X), torch.tensor(y)\n\n    def __len__(self):\n        return len(self.y)\n\n    def __getitem__(self, idx):\n        return {\"x\": self.X[idx], \"y\": self.y[idx]}\n\n\ntrain_ds = SyntheticReasoningDataset(n=2500, d=20, shift=False)\nval_ds = SyntheticReasoningDataset(n=500, d=20, shift=False)\ntest_shift_ds = SyntheticReasoningDataset(n=800, d=20, shift=True)\n\ntrain_loader = DataLoader(train_ds, batch_size=64, shuffle=True)\nval_loader = DataLoader(val_ds, batch_size=128, shuffle=False)\n\n\n# -----------------------\n# Model with LoRA layer\n# -----------------------\nclass LoRALinear(nn.Module):\n    def __init__(self, in_features, out_features, rank=4, alpha=1.0):\n        super().__init__()\n        self.weight = nn.Parameter(torch.randn(out_features, in_features) * 0.02)\n        self.bias = nn.Parameter(torch.zeros(out_features))\n        self.rank = rank\n        self.alpha = alpha\n        self.A = nn.Parameter(torch.zeros(rank, in_features))\n        self.B = nn.Parameter(torch.zeros(out_features, rank))\n        nn.init.normal_(self.A, std=0.02)\n        nn.init.zeros_(self.B)\n\n    def forward(self, x):\n        delta = (self.B @ self.A) * (self.alpha / self.rank)\n        return F.linear(x, self.weight + delta, self.bias)\n\n    def lora_parameters(self):\n        return [self.A, self.B]\n\n    def reset_lora(self):\n        nn.init.normal_(self.A, std=0.02)\n        nn.init.zeros_(self.B)\n\n\nclass SimpleNet(nn.Module):\n    def __init__(self, d=20, h=32, num_classes=2, rank=4):\n        super().__init__()\n        self.fc1 = LoRALinear(d, h, rank=rank, alpha=1.0)\n        self.fc2 = nn.Linear(h, num_classes)\n\n    def forward(self, x):\n        x = self.fc1(x)\n        x = torch.tanh(x)\n        return self.fc2(x)\n\n    def freeze_backbone(self):\n        for p in self.parameters():\n            p.requires_grad = False\n        for p in self.fc1.lora_parameters():\n            p.requires_grad = True\n\n    def unfreeze_all(self):\n        for p in self.parameters():\n            p.requires_grad = True\n\n    def reset_lora(self):\n        self.fc1.reset_lora()\n\n\nmodel = SimpleNet().to(device)\ncriterion = nn.CrossEntropyLoss()\nmodel.unfreeze_all()\noptimizer = torch.optim.Adam(model.parameters(), lr=1e-3)\n\n# -----------------------\n# Train backbone on source\n# -----------------------\nepochs = 12\nbest_state = None\nbest_val = float(\"inf\")\n\nfor epoch in range(1, epochs + 1):\n    model.train()\n    train_loss, train_correct, train_total = 0.0, 0, 0\n    for batch in train_loader:\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        x, y = batch[\"x\"], batch[\"y\"]\n        optimizer.zero_grad()\n        logits = model(x)\n        loss = criterion(logits, y)\n        loss.backward()\n        optimizer.step()\n\n        train_loss += loss.item() * y.size(0)\n        preds = logits.argmax(dim=1)\n        train_correct += (preds == y).sum().item()\n        train_total += y.size(0)\n\n    train_loss /= train_total\n    train_acc = train_correct / train_total\n\n    model.eval()\n    val_loss, val_correct, val_total = 0.0, 0, 0\n    with torch.no_grad():\n        for batch in val_loader:\n            batch = {\n                k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n            }\n            x, y = batch[\"x\"], batch[\"y\"]\n            logits = model(x)\n            loss = criterion(logits, y)\n            val_loss += loss.item() * y.size(0)\n            preds = logits.argmax(dim=1)\n            val_correct += (preds == y).sum().item()\n            val_total += y.size(0)\n    val_loss /= val_total\n    val_acc = val_correct / val_total\n\n    experiment_data[\"synthetic_reasoning_stream\"][\"metrics\"][\"train\"].append(\n        (epoch, train_acc)\n    )\n    experiment_data[\"synthetic_reasoning_stream\"][\"metrics\"][\"val\"].append(\n        (epoch, val_acc)\n    )\n    experiment_data[\"synthetic_reasoning_stream\"][\"losses\"][\"train\"].append(\n        (epoch, train_loss)\n    )\n    experiment_data[\"synthetic_reasoning_stream\"][\"losses\"][\"val\"].append(\n        (epoch, val_loss)\n    )\n    experiment_data[\"synthetic_reasoning_stream\"][\"timestamps\"].append(time.time())\n\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n    if val_loss < best_val:\n        best_val = val_loss\n        best_state = copy.deepcopy(model.state_dict())\n\nmodel.load_state_dict(best_state)\n\n\n# -----------------------\n# Stream evaluation\n# -----------------------\ndef entropy_from_logits(logits):\n    p = F.softmax(logits, dim=-1)\n    return -(p * torch.log(p + 1e-8)).sum(dim=-1)\n\n\ndef stream_evaluate(\n    base_model, dataset, mode=\"frozen\", entropy_thresh=0.62, reset_every=100, lr=5e-2\n):\n    stream_model = copy.deepcopy(base_model).to(device)\n    stream_model.freeze_backbone()\n    stream_model.eval()\n    opt = torch.optim.SGD(stream_model.fc1.lora_parameters(), lr=lr)\n\n    preds_all, gt_all, ent_all, triggered = [], [], [], []\n    cumulative_acc = []\n    correct = 0\n\n    for i in range(len(dataset)):\n        batch = dataset[i]\n        x = batch[\"x\"].unsqueeze(0).to(device)\n        y = batch[\"y\"].unsqueeze(0).to(device)\n\n        stream_model.eval()\n        with torch.no_grad():\n            logits = stream_model(x)\n            ent = entropy_from_logits(logits).item()\n            pred = logits.argmax(dim=1)\n\n        preds_all.append(pred.item())\n        gt_all.append(y.item())\n        ent_all.append(ent)\n        correct += int(pred.item() == y.item())\n        cumulative_acc.append(correct / (i + 1))\n\n        do_update = False\n        if mode == \"always\":\n            do_update = True\n        elif mode == \"gated\":\n            do_update = ent > entropy_thresh\n\n        triggered.append(int(do_update))\n\n        if do_update:\n            stream_model.train()\n            opt.zero_grad()\n            logits_u = stream_model(x)\n            pseudo = logits_u.detach().argmax(dim=1)\n            loss_u = criterion(logits_u, pseudo)\n            loss_u.backward()\n            opt.step()\n\n        if mode in [\"always\", \"gated\"] and (i + 1) % reset_every == 0:\n            stream_model.reset_lora()\n\n    acc = np.mean(np.array(preds_all) == np.array(gt_all))\n    return {\n        \"accuracy\": float(acc),\n        \"preds\": np.array(preds_all),\n        \"gt\": np.array(gt_all),\n        \"entropy\": np.array(ent_all),\n        \"triggered\": np.array(triggered),\n        \"cumulative_acc\": np.array(cumulative_acc),\n    }\n\n\nfrozen_res = stream_evaluate(model, test_shift_ds, mode=\"frozen\")\nalways_res = stream_evaluate(model, test_shift_ds, mode=\"always\")\ngated_res = stream_evaluate(model, test_shift_ds, mode=\"gated\", entropy_thresh=0.62)\n\nexperiment_data[\"synthetic_reasoning_stream\"][\"stream_results\"] = {\n    \"frozen\": {\n        \"Shifted-Stream Accuracy\": frozen_res[\"accuracy\"],\n        \"trigger_rate\": float(frozen_res[\"triggered\"].mean()),\n    },\n    \"always\": {\n        \"Shifted-Stream Accuracy\": always_res[\"accuracy\"],\n        \"trigger_rate\": float(always_res[\"triggered\"].mean()),\n    },\n    \"gated\": {\n        \"Shifted-Stream Accuracy\": gated_res[\"accuracy\"],\n        \"trigger_rate\": float(gated_res[\"triggered\"].mean()),\n    },\n}\nexperiment_data[\"synthetic_reasoning_stream\"][\"metrics\"][\"test\"].append(\n    (\n        0,\n        {\n            \"frozen_acc\": frozen_res[\"accuracy\"],\n            \"always_acc\": always_res[\"accuracy\"],\n            \"gated_acc\": gated_res[\"accuracy\"],\n        },\n    )\n)\nexperiment_data[\"synthetic_reasoning_stream\"][\"predictions\"] = gated_res[\n    \"preds\"\n].tolist()\nexperiment_data[\"synthetic_reasoning_stream\"][\"ground_truth\"] = gated_res[\"gt\"].tolist()\n\nprint(\n    f\"Shifted-Stream Accuracy | frozen={frozen_res['accuracy']:.4f} | always={always_res['accuracy']:.4f} | gated={gated_res['accuracy']:.4f}\"\n)\nprint(\n    f\"Adapt trigger rate      | frozen={frozen_res['triggered'].mean():.4f} | always={always_res['triggered'].mean():.4f} | gated={gated_res['triggered'].mean():.4f}\"\n)\n\n# Save arrays\nnp.save(\n    os.path.join(working_dir, \"experiment_data.npy\"), experiment_data, allow_pickle=True\n)\nnp.save(os.path.join(working_dir, \"frozen_preds.npy\"), frozen_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"always_preds.npy\"), always_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"gated_preds.npy\"), gated_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"ground_truth.npy\"), gated_res[\"gt\"])\nnp.save(os.path.join(working_dir, \"gated_entropy.npy\"), gated_res[\"entropy\"])\nnp.save(os.path.join(working_dir, \"gated_triggered.npy\"), gated_res[\"triggered\"])\nnp.save(os.path.join(working_dir, \"frozen_cumacc.npy\"), frozen_res[\"cumulative_acc\"])\nnp.save(os.path.join(working_dir, \"always_cumacc.npy\"), always_res[\"cumulative_acc\"])\nnp.save(os.path.join(working_dir, \"gated_cumacc.npy\"), gated_res[\"cumulative_acc\"])\n\n# Visualization\nplt.figure(figsize=(8, 5))\nplt.plot(frozen_res[\"cumulative_acc\"], label=f\"Frozen ({frozen_res['accuracy']:.3f})\")\nplt.plot(\n    always_res[\"cumulative_acc\"], label=f\"Always-LoRA ({always_res['accuracy']:.3f})\"\n)\nplt.plot(gated_res[\"cumulative_acc\"], label=f\"Gated-LoRA ({gated_res['accuracy']:.3f})\")\nplt.xlabel(\"Shifted stream step\")\nplt.ylabel(\"Cumulative accuracy\")\nplt.title(\"Synthetic Shifted-Stream Accuracy\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(os.path.join(working_dir, \"synthetic_shifted_stream_accuracy.png\"))\nplt.close()\n", "# Set random seed\nimport random\nimport numpy as np\nimport torch\n\nseed = 0\nrandom.seed(seed)\nnp.random.seed(seed)\ntorch.manual_seed(seed)\nif torch.cuda.is_available():\n    torch.cuda.manual_seed(seed)\n\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport copy\nimport math\nimport time\nimport numpy as np\nimport matplotlib.pyplot as plt\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nfrom torch.utils.data import Dataset, DataLoader\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(42)\nnp.random.seed(42)\n\nexperiment_data = {\n    \"synthetic_reasoning_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"test\": []},\n        \"losses\": {\"train\": [], \"val\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"timestamps\": [],\n        \"stream_results\": {},\n    }\n}\n\n\n# -----------------------\n# Synthetic dataset\n# -----------------------\nclass SyntheticReasoningDataset(Dataset):\n    def __init__(self, n=2000, d=20, shift=False):\n        self.X, self.y = self.make_data(n, d, shift)\n\n    @staticmethod\n    def make_data(n, d, shift=False):\n        X = np.random.randn(n, d).astype(np.float32)\n        if not shift:\n            s0 = X[:, :5].sum(1)\n            s1 = X[:, 5:10].sum(1)\n            y = (s1 > s0).astype(np.int64)\n        else:\n            X = (1.3 * X + 0.4).astype(np.float32)\n            s0 = 0.6 * X[:, :5].sum(1) + 0.4 * X[:, 10:15].sum(1)\n            s1 = 0.7 * X[:, 5:10].sum(1) + 0.3 * X[:, 15:20].sum(1)\n            y = (s1 > s0 + 0.2).astype(np.int64)\n        # Normalize inputs carefully for model stability\n        mu = X.mean(axis=0, keepdims=True)\n        std = X.std(axis=0, keepdims=True) + 1e-6\n        X = ((X - mu) / std).astype(np.float32)\n        return torch.tensor(X), torch.tensor(y)\n\n    def __len__(self):\n        return len(self.y)\n\n    def __getitem__(self, idx):\n        return {\"x\": self.X[idx], \"y\": self.y[idx]}\n\n\ntrain_ds = SyntheticReasoningDataset(n=2500, d=20, shift=False)\nval_ds = SyntheticReasoningDataset(n=500, d=20, shift=False)\ntest_shift_ds = SyntheticReasoningDataset(n=800, d=20, shift=True)\n\ntrain_loader = DataLoader(train_ds, batch_size=64, shuffle=True)\nval_loader = DataLoader(val_ds, batch_size=128, shuffle=False)\n\n\n# -----------------------\n# Model with LoRA layer\n# -----------------------\nclass LoRALinear(nn.Module):\n    def __init__(self, in_features, out_features, rank=4, alpha=1.0):\n        super().__init__()\n        self.weight = nn.Parameter(torch.randn(out_features, in_features) * 0.02)\n        self.bias = nn.Parameter(torch.zeros(out_features))\n        self.rank = rank\n        self.alpha = alpha\n        self.A = nn.Parameter(torch.zeros(rank, in_features))\n        self.B = nn.Parameter(torch.zeros(out_features, rank))\n        nn.init.normal_(self.A, std=0.02)\n        nn.init.zeros_(self.B)\n\n    def forward(self, x):\n        delta = (self.B @ self.A) * (self.alpha / self.rank)\n        return F.linear(x, self.weight + delta, self.bias)\n\n    def lora_parameters(self):\n        return [self.A, self.B]\n\n    def reset_lora(self):\n        nn.init.normal_(self.A, std=0.02)\n        nn.init.zeros_(self.B)\n\n\nclass SimpleNet(nn.Module):\n    def __init__(self, d=20, h=32, num_classes=2, rank=4):\n        super().__init__()\n        self.fc1 = LoRALinear(d, h, rank=rank, alpha=1.0)\n        self.fc2 = nn.Linear(h, num_classes)\n\n    def forward(self, x):\n        x = self.fc1(x)\n        x = torch.tanh(x)\n        return self.fc2(x)\n\n    def freeze_backbone(self):\n        for p in self.parameters():\n            p.requires_grad = False\n        for p in self.fc1.lora_parameters():\n            p.requires_grad = True\n\n    def unfreeze_all(self):\n        for p in self.parameters():\n            p.requires_grad = True\n\n    def reset_lora(self):\n        self.fc1.reset_lora()\n\n\nmodel = SimpleNet().to(device)\ncriterion = nn.CrossEntropyLoss()\nmodel.unfreeze_all()\noptimizer = torch.optim.Adam(model.parameters(), lr=1e-3)\n\n# -----------------------\n# Train backbone on source\n# -----------------------\nepochs = 12\nbest_state = None\nbest_val = float(\"inf\")\n\nfor epoch in range(1, epochs + 1):\n    model.train()\n    train_loss, train_correct, train_total = 0.0, 0, 0\n    for batch in train_loader:\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        x, y = batch[\"x\"], batch[\"y\"]\n        optimizer.zero_grad()\n        logits = model(x)\n        loss = criterion(logits, y)\n        loss.backward()\n        optimizer.step()\n\n        train_loss += loss.item() * y.size(0)\n        preds = logits.argmax(dim=1)\n        train_correct += (preds == y).sum().item()\n        train_total += y.size(0)\n\n    train_loss /= train_total\n    train_acc = train_correct / train_total\n\n    model.eval()\n    val_loss, val_correct, val_total = 0.0, 0, 0\n    with torch.no_grad():\n        for batch in val_loader:\n            batch = {\n                k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n            }\n            x, y = batch[\"x\"], batch[\"y\"]\n            logits = model(x)\n            loss = criterion(logits, y)\n            val_loss += loss.item() * y.size(0)\n            preds = logits.argmax(dim=1)\n            val_correct += (preds == y).sum().item()\n            val_total += y.size(0)\n    val_loss /= val_total\n    val_acc = val_correct / val_total\n\n    experiment_data[\"synthetic_reasoning_stream\"][\"metrics\"][\"train\"].append(\n        (epoch, train_acc)\n    )\n    experiment_data[\"synthetic_reasoning_stream\"][\"metrics\"][\"val\"].append(\n        (epoch, val_acc)\n    )\n    experiment_data[\"synthetic_reasoning_stream\"][\"losses\"][\"train\"].append(\n        (epoch, train_loss)\n    )\n    experiment_data[\"synthetic_reasoning_stream\"][\"losses\"][\"val\"].append(\n        (epoch, val_loss)\n    )\n    experiment_data[\"synthetic_reasoning_stream\"][\"timestamps\"].append(time.time())\n\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n    if val_loss < best_val:\n        best_val = val_loss\n        best_state = copy.deepcopy(model.state_dict())\n\nmodel.load_state_dict(best_state)\n\n\n# -----------------------\n# Stream evaluation\n# -----------------------\ndef entropy_from_logits(logits):\n    p = F.softmax(logits, dim=-1)\n    return -(p * torch.log(p + 1e-8)).sum(dim=-1)\n\n\ndef stream_evaluate(\n    base_model, dataset, mode=\"frozen\", entropy_thresh=0.62, reset_every=100, lr=5e-2\n):\n    stream_model = copy.deepcopy(base_model).to(device)\n    stream_model.freeze_backbone()\n    stream_model.eval()\n    opt = torch.optim.SGD(stream_model.fc1.lora_parameters(), lr=lr)\n\n    preds_all, gt_all, ent_all, triggered = [], [], [], []\n    cumulative_acc = []\n    correct = 0\n\n    for i in range(len(dataset)):\n        batch = dataset[i]\n        x = batch[\"x\"].unsqueeze(0).to(device)\n        y = batch[\"y\"].unsqueeze(0).to(device)\n\n        stream_model.eval()\n        with torch.no_grad():\n            logits = stream_model(x)\n            ent = entropy_from_logits(logits).item()\n            pred = logits.argmax(dim=1)\n\n        preds_all.append(pred.item())\n        gt_all.append(y.item())\n        ent_all.append(ent)\n        correct += int(pred.item() == y.item())\n        cumulative_acc.append(correct / (i + 1))\n\n        do_update = False\n        if mode == \"always\":\n            do_update = True\n        elif mode == \"gated\":\n            do_update = ent > entropy_thresh\n\n        triggered.append(int(do_update))\n\n        if do_update:\n            stream_model.train()\n            opt.zero_grad()\n            logits_u = stream_model(x)\n            pseudo = logits_u.detach().argmax(dim=1)\n            loss_u = criterion(logits_u, pseudo)\n            loss_u.backward()\n            opt.step()\n\n        if mode in [\"always\", \"gated\"] and (i + 1) % reset_every == 0:\n            stream_model.reset_lora()\n\n    acc = np.mean(np.array(preds_all) == np.array(gt_all))\n    return {\n        \"accuracy\": float(acc),\n        \"preds\": np.array(preds_all),\n        \"gt\": np.array(gt_all),\n        \"entropy\": np.array(ent_all),\n        \"triggered\": np.array(triggered),\n        \"cumulative_acc\": np.array(cumulative_acc),\n    }\n\n\nfrozen_res = stream_evaluate(model, test_shift_ds, mode=\"frozen\")\nalways_res = stream_evaluate(model, test_shift_ds, mode=\"always\")\ngated_res = stream_evaluate(model, test_shift_ds, mode=\"gated\", entropy_thresh=0.62)\n\nexperiment_data[\"synthetic_reasoning_stream\"][\"stream_results\"] = {\n    \"frozen\": {\n        \"Shifted-Stream Accuracy\": frozen_res[\"accuracy\"],\n        \"trigger_rate\": float(frozen_res[\"triggered\"].mean()),\n    },\n    \"always\": {\n        \"Shifted-Stream Accuracy\": always_res[\"accuracy\"],\n        \"trigger_rate\": float(always_res[\"triggered\"].mean()),\n    },\n    \"gated\": {\n        \"Shifted-Stream Accuracy\": gated_res[\"accuracy\"],\n        \"trigger_rate\": float(gated_res[\"triggered\"].mean()),\n    },\n}\nexperiment_data[\"synthetic_reasoning_stream\"][\"metrics\"][\"test\"].append(\n    (\n        0,\n        {\n            \"frozen_acc\": frozen_res[\"accuracy\"],\n            \"always_acc\": always_res[\"accuracy\"],\n            \"gated_acc\": gated_res[\"accuracy\"],\n        },\n    )\n)\nexperiment_data[\"synthetic_reasoning_stream\"][\"predictions\"] = gated_res[\n    \"preds\"\n].tolist()\nexperiment_data[\"synthetic_reasoning_stream\"][\"ground_truth\"] = gated_res[\"gt\"].tolist()\n\nprint(\n    f\"Shifted-Stream Accuracy | frozen={frozen_res['accuracy']:.4f} | always={always_res['accuracy']:.4f} | gated={gated_res['accuracy']:.4f}\"\n)\nprint(\n    f\"Adapt trigger rate      | frozen={frozen_res['triggered'].mean():.4f} | always={always_res['triggered'].mean():.4f} | gated={gated_res['triggered'].mean():.4f}\"\n)\n\n# Save arrays\nnp.save(\n    os.path.join(working_dir, \"experiment_data.npy\"), experiment_data, allow_pickle=True\n)\nnp.save(os.path.join(working_dir, \"frozen_preds.npy\"), frozen_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"always_preds.npy\"), always_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"gated_preds.npy\"), gated_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"ground_truth.npy\"), gated_res[\"gt\"])\nnp.save(os.path.join(working_dir, \"gated_entropy.npy\"), gated_res[\"entropy\"])\nnp.save(os.path.join(working_dir, \"gated_triggered.npy\"), gated_res[\"triggered\"])\nnp.save(os.path.join(working_dir, \"frozen_cumacc.npy\"), frozen_res[\"cumulative_acc\"])\nnp.save(os.path.join(working_dir, \"always_cumacc.npy\"), always_res[\"cumulative_acc\"])\nnp.save(os.path.join(working_dir, \"gated_cumacc.npy\"), gated_res[\"cumulative_acc\"])\n\n# Visualization\nplt.figure(figsize=(8, 5))\nplt.plot(frozen_res[\"cumulative_acc\"], label=f\"Frozen ({frozen_res['accuracy']:.3f})\")\nplt.plot(\n    always_res[\"cumulative_acc\"], label=f\"Always-LoRA ({always_res['accuracy']:.3f})\"\n)\nplt.plot(gated_res[\"cumulative_acc\"], label=f\"Gated-LoRA ({gated_res['accuracy']:.3f})\")\nplt.xlabel(\"Shifted stream step\")\nplt.ylabel(\"Cumulative accuracy\")\nplt.title(\"Synthetic Shifted-Stream Accuracy\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(os.path.join(working_dir, \"synthetic_shifted_stream_accuracy.png\"))\nplt.close()\n"], "term_out": ["['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 0.4816', '\\n', 'Epoch\n2: validation_loss = 0.2744', '\\n', 'Epoch 3: validation_loss = 0.1787', '\\n',\n'Epoch 4: validation_loss = 0.1348', '\\n', 'Epoch 5: validation_loss = 0.1106',\n'\\n', 'Epoch 6: validation_loss = 0.0958', '\\n', 'Epoch 7: validation_loss =\n0.0851', '\\n', 'Epoch 8: validation_loss = 0.0779', '\\n', 'Epoch 9:\nvalidation_loss = 0.0707', '\\n', 'Epoch 10: validation_loss = 0.0671', '\\n',\n'Epoch 11: validation_loss = 0.0636', '\\n', 'Epoch 12: validation_loss =\n0.0599', '\\n', 'Shifted-Stream Accuracy | frozen=0.8387 | always=0.8337 |\ngated=0.8438', '\\n', 'Adapt trigger rate      | frozen=0.0000 | always=1.0000 |\ngated=0.0762', '\\n', 'Execution time: a second seconds (time limit is 2\nhours).']", "['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 0.4816', '\\n', 'Epoch\n2: validation_loss = 0.2744', '\\n', 'Epoch 3: validation_loss = 0.1787', '\\n',\n'Epoch 4: validation_loss = 0.1348', '\\n', 'Epoch 5: validation_loss = 0.1106',\n'\\n', 'Epoch 6: validation_loss = 0.0958', '\\n', 'Epoch 7: validation_loss =\n0.0851', '\\n', 'Epoch 8: validation_loss = 0.0779', '\\n', 'Epoch 9:\nvalidation_loss = 0.0707', '\\n', 'Epoch 10: validation_loss = 0.0671', '\\n',\n'Epoch 11: validation_loss = 0.0636', '\\n', 'Epoch 12: validation_loss =\n0.0599', '\\n', 'Shifted-Stream Accuracy | frozen=0.8387 | always=0.8337 |\ngated=0.8438', '\\n', 'Adapt trigger rate      | frozen=0.0000 | always=1.0000 |\ngated=0.0762', '\\n', 'Execution time: 2 seconds seconds (time limit is 2\nhours).']"], "analysis": ["", ""], "exc_type": [null, null], "exc_info": [null, null], "exc_stack": [null, null], "exp_name": "0-run", "metrics": [{"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Final training accuracy achieved on the dataset.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.9928, "best_value": 0.9928}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Validation accuracy over training; includes final and best values.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.98, "best_value": 0.984}]}, {"metric_name": "training loss", "lower_is_better": true, "description": "Final training loss achieved on the dataset.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.058027, "best_value": 0.058027}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Validation loss over training; includes final and best values.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.059878, "best_value": 0.059878}]}, {"metric_name": "test shifted-stream accuracy (frozen adaptation)", "lower_is_better": false, "description": "Test accuracy on the shifted stream using frozen adaptation.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.83875, "best_value": 0.83875}]}, {"metric_name": "test shifted-stream accuracy (always adaptation)", "lower_is_better": false, "description": "Test accuracy on the shifted stream using always-on adaptation.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.83375, "best_value": 0.83375}]}, {"metric_name": "test shifted-stream accuracy (gated adaptation)", "lower_is_better": false, "description": "Test accuracy on the shifted stream using gated adaptation.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.84375, "best_value": 0.84375}]}, {"metric_name": "adaptation trigger rate (frozen)", "lower_is_better": true, "description": "Rate at which adaptation was triggered under the frozen strategy.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "adaptation trigger rate (always)", "lower_is_better": true, "description": "Rate at which adaptation was triggered under the always strategy.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "adaptation trigger rate (gated)", "lower_is_better": true, "description": "Rate at which adaptation was triggered under the gated strategy.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.07625, "best_value": 0.07625}]}]}, {"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Final training accuracy.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.9928, "best_value": 0.9928}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Validation accuracy over training; includes final and best values.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.98, "best_value": 0.984}]}, {"metric_name": "training loss", "lower_is_better": true, "description": "Final training loss.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.058027, "best_value": 0.058027}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Validation loss over training; includes final and best values.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.059878, "best_value": 0.059878}]}, {"metric_name": "test shifted-stream accuracy (frozen adaptation)", "lower_is_better": false, "description": "Test shifted-stream accuracy with frozen adaptation.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.83875, "best_value": 0.83875}]}, {"metric_name": "test shifted-stream accuracy (always adaptation)", "lower_is_better": false, "description": "Test shifted-stream accuracy with always adaptation.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.83375, "best_value": 0.83375}]}, {"metric_name": "test shifted-stream accuracy (gated adaptation)", "lower_is_better": false, "description": "Test shifted-stream accuracy with gated adaptation.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.84375, "best_value": 0.84375}]}, {"metric_name": "adaptation trigger rate (frozen)", "lower_is_better": true, "description": "Adaptation trigger rate under frozen policy.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "adaptation trigger rate (always)", "lower_is_better": true, "description": "Adaptation trigger rate under always-adapt policy.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "adaptation trigger rate (gated)", "lower_is_better": true, "description": "Adaptation trigger rate under gated policy.", "data": [{"dataset_name": "synthetic_reasoning_stream", "final_value": 0.07625, "best_value": 0.07625}]}]}], "is_best_node": [true, false], "plots": [["../../logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_shifted_stream_accuracy.png", "../../logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_train_val_accuracy.png", "../../logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_train_val_loss.png", "../../logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_stream_results_bar.png", "../../logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_cumulative_stream_accuracy.png", "../../logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_gated_predictions_vs_ground_truth_prefix.png", "../../logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_gated_confusion_matrix.png", "../../logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_gated_entropy_triggers.png"], ["../../logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_shifted_stream_accuracy.png", "../../logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_train_val_accuracy.png", "../../logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_train_val_loss.png", "../../logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_stream_results_bar.png", "../../logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_cumulative_stream_accuracy.png", "../../logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_gated_predictions_vs_ground_truth_prefix.png", "../../logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_gated_confusion_matrix.png", "../../logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_gated_entropy_triggers.png"]], "plot_paths": [["experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_shifted_stream_accuracy.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_train_val_accuracy.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_train_val_loss.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_stream_results_bar.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_cumulative_stream_accuracy.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_gated_predictions_vs_ground_truth_prefix.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_gated_confusion_matrix.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_gated_entropy_triggers.png"], ["experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_shifted_stream_accuracy.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_train_val_accuracy.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_train_val_loss.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_stream_results_bar.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_cumulative_stream_accuracy.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_gated_predictions_vs_ground_truth_prefix.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_gated_confusion_matrix.png", "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_gated_entropy_triggers.png"]], "plot_analyses": [[{"analysis": "The cumulative shifted-stream accuracy plot shows a consistent ranking of Gated-LoRA > Frozen > Always-LoRA over most of the stream. Final cumulative accuracies in the legend are approximately 0.844 for gated, 0.839 for frozen, and 0.834 for always-on adaptation, so the gated policy yields a small absolute gain of about 0.5 points over frozen and about 1 point over always-on. The early part of the stream is noisy, but after the initial transient the green curve remains slightly above the others with relatively stable separation. This is qualitatively aligned with the hypothesis: selective adaptation appears to capture some benefit under shift without the degradation seen when adapting on every example. At the same time, the effect size is modest, so this should be framed as a preliminary proof-of-functionality result rather than strong evidence of broad robustness gains.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_shifted_stream_accuracy.png"}, {"analysis": "The training and validation accuracy curves on the synthetic reasoning dataset indicate that the base setup is learning successfully and generalizing well on the in-distribution task. Training accuracy rises rapidly from about 0.82 to around 0.99, while validation accuracy starts high near 0.94 and plateaus around 0.98. The train-validation gap remains very small throughout, suggesting little obvious overfitting. This is useful because it means downstream shifted-stream behavior is unlikely to be explained by a poorly trained base model. For the current stage, these curves support that the implementation is basically correct and the synthetic task is easy enough to debug adaptation behavior.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_train_val_accuracy.png"}, {"analysis": "The training and validation loss curves decrease smoothly and monotonically from roughly 0.60/0.48 to about 0.06 on both splits. The close alignment between train and validation loss further supports stable optimization and good generalization in the base model. There are no visible instabilities, divergence events, or late-epoch increases that would indicate optimization problems. This is a positive sign for the initial implementation stage because it suggests that any differences among adaptation modes are likely due to the test-time adaptation logic rather than training pathologies.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_train_val_loss.png"}, {"analysis": "The bar-chart summary compresses the shifted-stream results and makes the main takeaway clear: gated adaptation attains the highest accuracy, frozen is slightly lower, and always-on adaptation is the worst of the three. The adjacent trigger-rate panel is especially informative for the paper\u2019s central claim. Frozen naturally has zero updates, always-on has a trigger rate of 1.0, and gated appears to trigger only around 0.08 of the time. This means the best-performing method also updates on only a small fraction of examples, which is encouraging from both stability and efficiency perspectives. If this pattern holds on real benchmarks, it would be a strong practical argument for confidence-gated adaptation.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_stream_results_bar.png"}, {"analysis": "The second cumulative stream-accuracy plot is consistent with the earlier stream plot and reinforces the same ranking and temporal behavior. The trajectories suggest that always-on adaptation suffers a persistent penalty rather than just a short-lived warm-up issue, while gated adaptation preserves a small but durable advantage. Because the separations are narrow, repeated runs with error bars would be important before making strong claims. Still, for a preliminary implementation milestone, the consistency across duplicated summary views is reassuring.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_cumulative_stream_accuracy.png"}, {"analysis": "The predicted-label trace against ground truth provides a qualitative sanity check that the model is not collapsing to a single class and that predictions broadly track the binary target sequence. There are visible mismatches, but the predicted sequence follows the switching structure of the labels reasonably often. As a diagnostic figure, this is useful for confirming that the gated system is producing nontrivial outputs under shift. However, the trace is visually dense and not very quantitative; for a paper, segment-level error annotations or correctness bands would likely communicate adaptation behavior more clearly than overlapping binary line traces.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_gated_predictions_vs_ground_truth_prefix.png"}, {"analysis": "The gated-mode confusion matrix shows balanced performance across both classes: true negatives are 334 and true positives are 341, with false positives 68 and false negatives 57. This corresponds to total accuracy of 675/800, about 0.844, matching the stream summary. The errors are fairly symmetric, with slightly fewer false negatives than false positives, so there is no strong indication of severe class bias in gated mode. This is a good sign because it suggests the observed gain is not coming from exploiting class imbalance or collapsing toward one label. For a more complete analysis, comparable confusion matrices for frozen and always-on modes would help reveal whether gating improves one class disproportionately.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_gated_confusion_matrix.png"}, {"analysis": "The entropy-and-trigger plot supports the intended mechanism of the gated policy. Triggered updates occur at high-entropy points, and the entropy series exhibits many low values punctuated by spikes, implying that uncertainty is intermittent rather than constant. This matches the idea of selective adaptation on difficult or shifted examples. The trigger frequency also appears sparse relative to the full 800-step stream, consistent with the bar chart\u2019s low trigger rate. One caveat is that the plot does not directly show whether triggers are concentrated around actual distribution-shift boundaries or whether they correlate with subsequent accuracy recovery. That causal link would be valuable in future diagnostics.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_d3d17ca0404b4ea197b4013e7702d469_proc_20434/synthetic_reasoning_stream_gated_entropy_triggers.png"}], [{"analysis": "Synthetic shifted-stream cumulative accuracy indicates a small but consistent ranking: Gated-LoRA (0.844) > Frozen (0.839) > Always-LoRA (0.834). The green curve starts volatile, then stabilizes above the others for most of the stream. This is directionally aligned with the hypothesis that selective adaptation can help under shift while avoiding the degradation seen with updating on every example. The absolute gain is modest, so at this stage the result supports feasibility more than a strong scientific claim. The early-stream instability also suggests adaptation dynamics are not yet fully controlled.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_shifted_stream_accuracy.png"}, {"analysis": "Training and validation accuracy on the synthetic reasoning dataset rise quickly and plateau near 0.98\u20130.99. The small train-validation gap across later epochs suggests the base setup is implemented correctly and is not obviously overfitting. Because both curves saturate early, this dataset may be too easy to reveal nuanced benefits of test-time adaptation. For the current implementation stage, this is useful as a sanity check that the core training pipeline works.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_train_val_accuracy.png"}, {"analysis": "Training and validation loss decrease smoothly and remain closely aligned, ending around 0.06. This reinforces that optimization is stable and the synthetic task is well learned. The absence of divergence or noisy oscillation is encouraging for code correctness. At the same time, such low final losses again imply limited headroom, so downstream adaptation gains on this synthetic benchmark may naturally be small.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_train_val_loss.png"}, {"analysis": "The bar summaries confirm the stream-level result: gated mode has the highest accuracy, always-on is the weakest, and frozen is in between. The trigger-rate panel is especially informative: frozen triggers 0, always-on triggers 1.0, and gated triggers only about 0.08. This is a strong implementation sanity check for the confidence-gating mechanism, because it shows the selective policy is actually selective. The key takeaway is favorable efficiency-performance tradeoff: a slight accuracy gain while updating on only a small fraction of examples.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_stream_results_bar.png"}, {"analysis": "The repeated cumulative stream accuracy plot is consistent with the earlier line chart and strengthens confidence that the observed ranking is not a reading error. Gated-LoRA remains slightly above frozen over most of the trajectory, while always-on lags. The persistent but narrow separation suggests the effect is real in this run, though likely sensitive to randomness and stream construction. Multiple seeds and confidence intervals will be important before drawing stronger conclusions.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_cumulative_stream_accuracy.png"}, {"analysis": "The predicted-label trace against ground truth provides a qualitative sample-level view. The gated predictions often track the binary target sequence but still show frequent mismatches, which is consistent with an overall accuracy in the mid-0.84 range rather than near-perfect performance. This plot is useful as a debugging artifact, but it is visually dense and not ideal for quantitative comparison. For paper-quality analysis, segmenting by stream region or highlighting error bursts around shifts would be more informative.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_gated_predictions_vs_ground_truth_prefix.png"}, {"analysis": "The gated-mode confusion matrix shows balanced performance across classes: true negatives 334 and true positives 341, with false positives 68 and false negatives 57. This implies recall for class 1 is slightly higher than specificity for class 0, but the difference is small. There is no obvious class-collapse or severe asymmetry, which is good for a preliminary implementation. It would still be useful to report normalized rates and calibration metrics, especially because confidence gating depends on uncertainty quality.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_gated_confusion_matrix.png"}, {"analysis": "The entropy-and-trigger plot suggests updates are fired on high-entropy events, as intended. Trigger markers appear sparse relative to the full stream and align with peaks in uncertainty, supporting that the gating logic is connected to the confidence signal rather than behaving randomly. However, entropy is highly spiky throughout the stream, which may indicate either a noisy synthetic stream or a threshold that produces brittle decisions. Future refinement should examine threshold sensitivity, moving-average triggers, or margin-based gating to reduce instability.", "plot_path": "experiments/2026-03-29_01-53-16_confidence_gated_ttl_lora_attempt_0/logs/0-run/experiment_results/experiment_8c7eaa078ed74b6dbeaa5127d5f3c8fb_proc_20434/synthetic_reasoning_stream_gated_entropy_triggers.png"}]], "vlm_feedback_summary": ["The uploaded figures show a preliminary synthetic experiment with a base\nreasoning model that trains cleanly, then is evaluated under a shifted stream\nwith three modes: frozen, always-on LoRA, and confidence-gated LoRA. Across the\nstream-level plots and summary bars, gated adaptation is consistently best but\nonly by a small margin over frozen, while always-on adaptation is slightly worse\nthan frozen. Trigger-rate plots indicate the gated policy updates rarely\nrelative to always-on, supporting the intended selectivity/efficiency story.\nAdditional diagnostics suggest the synthetic setup is functioning:\ntrain/validation curves are stable, the gated confusion matrix is balanced, and\nentropy spikes align with trigger events. Overall, the results support\nfeasibility of the implementation and weakly support the hypothesis that\nselective adaptation is safer than always adapting, but the gains are modest and\nthe evidence is still preliminary due to the synthetic binary setting and\nlimited diagnostics on compute/calibration.", "The plots show a basic synthetic implementation behaving sensibly. On the\nshifted stream, gated LoRA achieves the best cumulative accuracy with a small\nbut consistent gain over frozen and always-on adaptation, while using far fewer\nupdates than always-on. Training/validation curves indicate the base synthetic\nreasoning model converges cleanly with little overfitting. Additional\ndiagnostics suggest gated predictions are reasonably balanced and adaptation\ntriggers are sparse relative to always-on, supporting the intended selective-\nupdate mechanism. Overall, results are promising for functional correctness but\nthe gains are modest and currently limited to a simple synthetic setting."], "exec_time": [1.831456184387207, 2.151987314224243], "exec_time_feedback": ["", ""], "datasets_successfully_tested": [["synthetic_reasoning_stream"], ["synthetic_reasoning_stream"]], "plot_code": ["import matplotlib.pyplot as plt\nimport numpy as np\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nexp = {}\ntry:\n    exp = np.load(\n        os.path.join(working_dir, \"experiment_data.npy\"), allow_pickle=True\n    ).item()\nexcept Exception as e:\n    print(f\"Error loading experiment data: {e}\")\n\nds_name = \"synthetic_reasoning_stream\"\nds = exp.get(ds_name, {})\nmetrics = ds.get(\"metrics\", {})\nlosses = ds.get(\"losses\", {})\nstream_results = ds.get(\"stream_results\", {})\n\n\ndef load_optional(name):\n    path = os.path.join(working_dir, name)\n    return np.load(path, allow_pickle=True) if os.path.exists(path) else None\n\n\nfrozen_cumacc = load_optional(\"frozen_cumacc.npy\")\nalways_cumacc = load_optional(\"always_cumacc.npy\")\ngated_cumacc = load_optional(\"gated_cumacc.npy\")\ngated_entropy = load_optional(\"gated_entropy.npy\")\ngated_triggered = load_optional(\"gated_triggered.npy\")\nground_truth = load_optional(\"ground_truth.npy\")\ngated_preds = load_optional(\"gated_preds.npy\")\n\ntry:\n    tr = metrics.get(\"train\", [])\n    va = metrics.get(\"val\", [])\n    if tr or va:\n        plt.figure(figsize=(8, 5))\n        if tr:\n            e, y = zip(*tr)\n            plt.plot(e, y, marker=\"o\", label=\"Train Accuracy\")\n        if va:\n            e, y = zip(*va)\n            plt.plot(e, y, marker=\"o\", label=\"Validation Accuracy\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Accuracy\")\n        plt.title(\"Synthetic Reasoning Dataset\\nTraining and Validation Accuracy\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_train_val_accuracy.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating accuracy plot: {e}\")\n    plt.close()\n\ntry:\n    tr = losses.get(\"train\", [])\n    va = losses.get(\"val\", [])\n    if tr or va:\n        plt.figure(figsize=(8, 5))\n        if tr:\n            e, y = zip(*tr)\n            plt.plot(e, y, marker=\"o\", label=\"Train Loss\")\n        if va:\n            e, y = zip(*va)\n            plt.plot(e, y, marker=\"o\", label=\"Validation Loss\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Cross-Entropy Loss\")\n        plt.title(\"Synthetic Reasoning Dataset\\nTraining and Validation Loss\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_train_val_loss.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating loss plot: {e}\")\n    plt.close()\n\ntry:\n    if stream_results:\n        modes = [m for m in [\"frozen\", \"always\", \"gated\"] if m in stream_results]\n        accs = [stream_results[m].get(\"Shifted-Stream Accuracy\", np.nan) for m in modes]\n        trigs = [stream_results[m].get(\"trigger_rate\", np.nan) for m in modes]\n        x = np.arange(len(modes))\n        plt.figure(figsize=(9, 4))\n        plt.subplot(1, 2, 1)\n        plt.bar(x, accs)\n        plt.xticks(x, modes)\n        plt.ylabel(\"Accuracy\")\n        plt.title(\"Synthetic Shifted Dataset\\nShifted-Stream Accuracy by Mode\")\n        plt.subplot(1, 2, 2)\n        plt.bar(x, trigs)\n        plt.xticks(x, modes)\n        plt.ylabel(\"Trigger Rate\")\n        plt.title(\"Synthetic Shifted Dataset\\nAdaptation Trigger Rate by Mode\")\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_stream_results_bar.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating stream results bar plot: {e}\")\n    plt.close()\n\ntry:\n    if any(v is not None for v in [frozen_cumacc, always_cumacc, gated_cumacc]):\n        plt.figure(figsize=(8, 5))\n        if frozen_cumacc is not None:\n            plt.plot(frozen_cumacc, label=\"Frozen\")\n        if always_cumacc is not None:\n            plt.plot(always_cumacc, label=\"Always-LoRA\")\n        if gated_cumacc is not None:\n            plt.plot(gated_cumacc, label=\"Gated-LoRA\")\n        plt.xlabel(\"Shifted Stream Step\")\n        plt.ylabel(\"Cumulative Accuracy\")\n        plt.title(\n            \"Synthetic Shifted Dataset\\nCumulative Stream Accuracy by Adaptation Mode\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{ds_name}_cumulative_stream_accuracy.png\")\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating cumulative accuracy plot: {e}\")\n    plt.close()\n\ntry:\n    if ground_truth is not None and gated_preds is not None:\n        n = min(200, len(ground_truth))\n        plt.figure(figsize=(10, 4))\n        plt.plot(np.arange(n), ground_truth[:n], label=\"Ground Truth\", linewidth=1.5)\n        plt.plot(\n            np.arange(n),\n            gated_preds[:n],\n            label=\"Gated Predictions\",\n            linewidth=1.0,\n            alpha=0.8,\n        )\n        plt.xlabel(\"Shifted Stream Step\")\n        plt.ylabel(\"Class Label\")\n        plt.title(\n            \"Synthetic Shifted Dataset\\nLeft: Ground Truth, Right: Generated Samples (Predicted Labels Trace)\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{ds_name}_gated_predictions_vs_ground_truth_prefix.png\"\n            )\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating prediction trace plot: {e}\")\n    plt.close()\n\ntry:\n    if ground_truth is not None and gated_preds is not None:\n        cm = np.zeros((2, 2), dtype=int)\n        for g, p in zip(ground_truth.astype(int), gated_preds.astype(int)):\n            if g in [0, 1] and p in [0, 1]:\n                cm[g, p] += 1\n        plt.figure(figsize=(5, 4))\n        plt.imshow(cm, cmap=\"Blues\")\n        for i in range(cm.shape[0]):\n            for j in range(cm.shape[1]):\n                plt.text(j, i, str(cm[i, j]), ha=\"center\", va=\"center\")\n        plt.xticks([0, 1], [\"Pred 0\", \"Pred 1\"])\n        plt.yticks([0, 1], [\"True 0\", \"True 1\"])\n        plt.xlabel(\"Predicted Label\")\n        plt.ylabel(\"True Label\")\n        plt.title(\"Synthetic Shifted Dataset\\nGated Mode Confusion Matrix\")\n        plt.colorbar()\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_gated_confusion_matrix.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating confusion matrix plot: {e}\")\n    plt.close()\n\ntry:\n    if gated_entropy is not None and gated_triggered is not None:\n        plt.figure(figsize=(10, 4))\n        x = np.arange(len(gated_entropy))\n        plt.plot(x, gated_entropy, label=\"Entropy\")\n        idx = np.where(gated_triggered > 0)[0]\n        if len(idx) > 0:\n            plt.scatter(idx, gated_entropy[idx], s=10, label=\"Triggered Updates\")\n        plt.xlabel(\"Shifted Stream Step\")\n        plt.ylabel(\"Entropy\")\n        plt.title(\n            \"Synthetic Shifted Dataset\\nGated Adaptation Entropy and Trigger Events\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_gated_entropy_triggers.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating entropy/trigger plot: {e}\")\n    plt.close()\n\ntest_metrics = metrics.get(\"test\", [])\nif test_metrics:\n    print(\"Test metrics:\", test_metrics[-1][1])\nif stream_results:\n    print(\"Stream results:\")\n    for k, v in stream_results.items():\n        print(k, v)\n", "import matplotlib.pyplot as plt\nimport numpy as np\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nexp = {}\ntry:\n    exp = np.load(\n        os.path.join(working_dir, \"experiment_data.npy\"), allow_pickle=True\n    ).item()\nexcept Exception as e:\n    print(f\"Error loading experiment data: {e}\")\n\nds_name = \"synthetic_reasoning_stream\"\nds = exp.get(ds_name, {})\nmetrics = ds.get(\"metrics\", {})\nlosses = ds.get(\"losses\", {})\nstream_results = ds.get(\"stream_results\", {})\n\n\ndef load_optional(name):\n    path = os.path.join(working_dir, name)\n    return np.load(path, allow_pickle=True) if os.path.exists(path) else None\n\n\nfrozen_cumacc = load_optional(\"frozen_cumacc.npy\")\nalways_cumacc = load_optional(\"always_cumacc.npy\")\ngated_cumacc = load_optional(\"gated_cumacc.npy\")\ngated_entropy = load_optional(\"gated_entropy.npy\")\ngated_triggered = load_optional(\"gated_triggered.npy\")\nground_truth = load_optional(\"ground_truth.npy\")\ngated_preds = load_optional(\"gated_preds.npy\")\n\ntry:\n    tr = metrics.get(\"train\", [])\n    va = metrics.get(\"val\", [])\n    if tr or va:\n        plt.figure(figsize=(8, 5))\n        if tr:\n            e, y = zip(*tr)\n            plt.plot(e, y, marker=\"o\", label=\"Train Accuracy\")\n        if va:\n            e, y = zip(*va)\n            plt.plot(e, y, marker=\"o\", label=\"Validation Accuracy\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Accuracy\")\n        plt.title(\"Synthetic Reasoning Dataset\\nTraining and Validation Accuracy\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_train_val_accuracy.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating accuracy plot: {e}\")\n    plt.close()\n\ntry:\n    tr = losses.get(\"train\", [])\n    va = losses.get(\"val\", [])\n    if tr or va:\n        plt.figure(figsize=(8, 5))\n        if tr:\n            e, y = zip(*tr)\n            plt.plot(e, y, marker=\"o\", label=\"Train Loss\")\n        if va:\n            e, y = zip(*va)\n            plt.plot(e, y, marker=\"o\", label=\"Validation Loss\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Cross-Entropy Loss\")\n        plt.title(\"Synthetic Reasoning Dataset\\nTraining and Validation Loss\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_train_val_loss.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating loss plot: {e}\")\n    plt.close()\n\ntry:\n    if stream_results:\n        modes = [m for m in [\"frozen\", \"always\", \"gated\"] if m in stream_results]\n        accs = [stream_results[m].get(\"Shifted-Stream Accuracy\", np.nan) for m in modes]\n        trigs = [stream_results[m].get(\"trigger_rate\", np.nan) for m in modes]\n        x = np.arange(len(modes))\n        plt.figure(figsize=(9, 4))\n        plt.subplot(1, 2, 1)\n        plt.bar(x, accs)\n        plt.xticks(x, modes)\n        plt.ylabel(\"Accuracy\")\n        plt.title(\"Synthetic Shifted Dataset\\nShifted-Stream Accuracy by Mode\")\n        plt.subplot(1, 2, 2)\n        plt.bar(x, trigs)\n        plt.xticks(x, modes)\n        plt.ylabel(\"Trigger Rate\")\n        plt.title(\"Synthetic Shifted Dataset\\nAdaptation Trigger Rate by Mode\")\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_stream_results_bar.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating stream results bar plot: {e}\")\n    plt.close()\n\ntry:\n    if any(v is not None for v in [frozen_cumacc, always_cumacc, gated_cumacc]):\n        plt.figure(figsize=(8, 5))\n        if frozen_cumacc is not None:\n            plt.plot(frozen_cumacc, label=\"Frozen\")\n        if always_cumacc is not None:\n            plt.plot(always_cumacc, label=\"Always-LoRA\")\n        if gated_cumacc is not None:\n            plt.plot(gated_cumacc, label=\"Gated-LoRA\")\n        plt.xlabel(\"Shifted Stream Step\")\n        plt.ylabel(\"Cumulative Accuracy\")\n        plt.title(\n            \"Synthetic Shifted Dataset\\nCumulative Stream Accuracy by Adaptation Mode\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{ds_name}_cumulative_stream_accuracy.png\")\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating cumulative accuracy plot: {e}\")\n    plt.close()\n\ntry:\n    if ground_truth is not None and gated_preds is not None:\n        n = min(200, len(ground_truth))\n        plt.figure(figsize=(10, 4))\n        plt.plot(np.arange(n), ground_truth[:n], label=\"Ground Truth\", linewidth=1.5)\n        plt.plot(\n            np.arange(n),\n            gated_preds[:n],\n            label=\"Gated Predictions\",\n            linewidth=1.0,\n            alpha=0.8,\n        )\n        plt.xlabel(\"Shifted Stream Step\")\n        plt.ylabel(\"Class Label\")\n        plt.title(\n            \"Synthetic Shifted Dataset\\nLeft: Ground Truth, Right: Generated Samples (Predicted Labels Trace)\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{ds_name}_gated_predictions_vs_ground_truth_prefix.png\"\n            )\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating prediction trace plot: {e}\")\n    plt.close()\n\ntry:\n    if ground_truth is not None and gated_preds is not None:\n        cm = np.zeros((2, 2), dtype=int)\n        for g, p in zip(ground_truth.astype(int), gated_preds.astype(int)):\n            if g in [0, 1] and p in [0, 1]:\n                cm[g, p] += 1\n        plt.figure(figsize=(5, 4))\n        plt.imshow(cm, cmap=\"Blues\")\n        for i in range(cm.shape[0]):\n            for j in range(cm.shape[1]):\n                plt.text(j, i, str(cm[i, j]), ha=\"center\", va=\"center\")\n        plt.xticks([0, 1], [\"Pred 0\", \"Pred 1\"])\n        plt.yticks([0, 1], [\"True 0\", \"True 1\"])\n        plt.xlabel(\"Predicted Label\")\n        plt.ylabel(\"True Label\")\n        plt.title(\"Synthetic Shifted Dataset\\nGated Mode Confusion Matrix\")\n        plt.colorbar()\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_gated_confusion_matrix.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating confusion matrix plot: {e}\")\n    plt.close()\n\ntry:\n    if gated_entropy is not None and gated_triggered is not None:\n        plt.figure(figsize=(10, 4))\n        x = np.arange(len(gated_entropy))\n        plt.plot(x, gated_entropy, label=\"Entropy\")\n        idx = np.where(gated_triggered > 0)[0]\n        if len(idx) > 0:\n            plt.scatter(idx, gated_entropy[idx], s=10, label=\"Triggered Updates\")\n        plt.xlabel(\"Shifted Stream Step\")\n        plt.ylabel(\"Entropy\")\n        plt.title(\n            \"Synthetic Shifted Dataset\\nGated Adaptation Entropy and Trigger Events\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(os.path.join(working_dir, f\"{ds_name}_gated_entropy_triggers.png\"))\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating entropy/trigger plot: {e}\")\n    plt.close()\n\ntest_metrics = metrics.get(\"test\", [])\nif test_metrics:\n    print(\"Test metrics:\", test_metrics[-1][1])\nif stream_results:\n    print(\"Stream results:\")\n    for k, v in stream_results.items():\n        print(k, v)\n"], "plot_plan": ["I\u2019ll load the saved experiment dictionary and any auxiliary `.npy` arrays that actually exist in the working directory, then generate a compact set of standard plots for this synthetic reasoning stream experiment. The first two figures will show training/validation accuracy and loss across epochs, since those are explicitly stored in `experiment_data.npy`. I\u2019ll also create a bar chart comparing shifted-stream accuracy and trigger rate across the frozen, always-adapt, and gated modes from `stream_results`. If the saved cumulative-accuracy arrays are present, I\u2019ll plot them together to show streaming performance over time on the synthetic shifted dataset. If predictions and ground truth are available, I\u2019ll add a prediction-vs-ground-truth trace for a suitable prefix of the stream and a confusion matrix for the gated mode. If entropy and trigger arrays exist, I\u2019ll plot entropy over stream steps with trigger markers to visualize when adaptation was activated. Each figure will be wrapped in its own `try/except`, saved with descriptive dataset-specific filenames into `working_dir`, and always closed. Finally, I\u2019ll print a small summary of available evaluation metrics such as the test accuracies and stream results.", null], "ablation_name": [null, null], "hyperparam_name": [null, null], "is_seed_node": [false, true], "is_seed_agg_node": [false, false], "parse_metrics_plan": ["I\u2019ll load the saved dictionary from `working/experiment_data.npy`, inspect each\ndataset entry, and extract the final or best values based on how the original\ntraining script stored metrics. For epoch-wise accuracy and loss lists, I\u2019ll\nreport the final train accuracy, final validation accuracy, best validation\nloss, and final training loss; for test metrics and stream results, I\u2019ll print\nthe stored shifted-stream accuracies and trigger rates with explicit labels. The\nscript will run immediately, use the required working directory path, avoid\nplots, and print the dataset name before its metrics.", "I\u2019ll load the saved dictionary from `working/experiment_data.npy`, inspect each\ndataset entry, and extract the final or best values based on how the original\ntraining script stored metrics. For epoch-wise accuracy and loss lists, I\u2019ll\nreport the final train accuracy, final validation accuracy, best validation\nloss, and final training loss; for test metrics and stream results, I\u2019ll print\nthe stored shifted-stream accuracies and trigger rates with explicit labels. The\nscript will run immediately, use the required working directory path, avoid\nplots, and print the dataset name before its metrics."], "parse_metrics_code": ["import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nfile_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(file_path, allow_pickle=True).item()\n\n\ndef safe_last_scalar(metric_list):\n    if not metric_list:\n        return None\n    _, value = metric_list[-1]\n    return value\n\n\ndef safe_best_min(metric_list):\n    if not metric_list:\n        return None\n    return min(value for _, value in metric_list)\n\n\ndef safe_best_max(metric_list):\n    if not metric_list:\n        return None\n    return max(value for _, value in metric_list)\n\n\ndef format_value(value):\n    if value is None:\n        return \"N/A\"\n    if isinstance(value, (float, np.floating)):\n        return f\"{float(value):.6f}\"\n    return str(value)\n\n\nfor dataset_name, dataset_data in experiment_data.items():\n    print(f\"Dataset: {dataset_name}\")\n\n    metrics = dataset_data.get(\"metrics\", {})\n    losses = dataset_data.get(\"losses\", {})\n    stream_results = dataset_data.get(\"stream_results\", {})\n\n    train_accuracy_final = safe_last_scalar(metrics.get(\"train\", []))\n    validation_accuracy_final = safe_last_scalar(metrics.get(\"val\", []))\n    training_loss_final = safe_last_scalar(losses.get(\"train\", []))\n    validation_loss_final = safe_last_scalar(losses.get(\"val\", []))\n    validation_loss_best = safe_best_min(losses.get(\"val\", []))\n    validation_accuracy_best = safe_best_max(metrics.get(\"val\", []))\n\n    if train_accuracy_final is not None:\n        print(f\"  Train accuracy (final): {format_value(train_accuracy_final)}\")\n    if validation_accuracy_final is not None:\n        print(\n            f\"  Validation accuracy (final): {format_value(validation_accuracy_final)}\"\n        )\n    if validation_accuracy_best is not None:\n        print(f\"  Validation accuracy (best): {format_value(validation_accuracy_best)}\")\n    if training_loss_final is not None:\n        print(f\"  Training loss (final): {format_value(training_loss_final)}\")\n    if validation_loss_final is not None:\n        print(f\"  Validation loss (final): {format_value(validation_loss_final)}\")\n    if validation_loss_best is not None:\n        print(f\"  Validation loss (best): {format_value(validation_loss_best)}\")\n\n    test_metrics = metrics.get(\"test\", [])\n    if test_metrics:\n        _, test_value = test_metrics[-1]\n        if isinstance(test_value, dict):\n            if \"frozen_acc\" in test_value:\n                print(\n                    f\"  Test shifted-stream accuracy (frozen adaptation): {format_value(test_value['frozen_acc'])}\"\n                )\n            if \"always_acc\" in test_value:\n                print(\n                    f\"  Test shifted-stream accuracy (always adaptation): {format_value(test_value['always_acc'])}\"\n                )\n            if \"gated_acc\" in test_value:\n                print(\n                    f\"  Test shifted-stream accuracy (gated adaptation): {format_value(test_value['gated_acc'])}\"\n                )\n        else:\n            print(f\"  Test metric (final): {format_value(test_value)}\")\n\n    for mode_name, result_dict in stream_results.items():\n        accuracy_key = \"Shifted-Stream Accuracy\"\n        if accuracy_key in result_dict:\n            print(\n                f\"  Shifted-stream accuracy ({mode_name}): {format_value(result_dict[accuracy_key])}\"\n            )\n        if \"trigger_rate\" in result_dict:\n            print(\n                f\"  Adaptation trigger rate ({mode_name}): {format_value(result_dict['trigger_rate'])}\"\n            )\n\n    print()\n", "import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nfile_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(file_path, allow_pickle=True).item()\n\n\ndef safe_last_scalar(metric_list):\n    if not metric_list:\n        return None\n    _, value = metric_list[-1]\n    return value\n\n\ndef safe_best_min(metric_list):\n    if not metric_list:\n        return None\n    return min(value for _, value in metric_list)\n\n\ndef safe_best_max(metric_list):\n    if not metric_list:\n        return None\n    return max(value for _, value in metric_list)\n\n\ndef format_value(value):\n    if value is None:\n        return \"N/A\"\n    if isinstance(value, (float, np.floating)):\n        return f\"{float(value):.6f}\"\n    return str(value)\n\n\nfor dataset_name, dataset_data in experiment_data.items():\n    print(f\"Dataset: {dataset_name}\")\n\n    metrics = dataset_data.get(\"metrics\", {})\n    losses = dataset_data.get(\"losses\", {})\n    stream_results = dataset_data.get(\"stream_results\", {})\n\n    train_accuracy_final = safe_last_scalar(metrics.get(\"train\", []))\n    validation_accuracy_final = safe_last_scalar(metrics.get(\"val\", []))\n    training_loss_final = safe_last_scalar(losses.get(\"train\", []))\n    validation_loss_final = safe_last_scalar(losses.get(\"val\", []))\n    validation_loss_best = safe_best_min(losses.get(\"val\", []))\n    validation_accuracy_best = safe_best_max(metrics.get(\"val\", []))\n\n    if train_accuracy_final is not None:\n        print(f\"  Train accuracy (final): {format_value(train_accuracy_final)}\")\n    if validation_accuracy_final is not None:\n        print(\n            f\"  Validation accuracy (final): {format_value(validation_accuracy_final)}\"\n        )\n    if validation_accuracy_best is not None:\n        print(f\"  Validation accuracy (best): {format_value(validation_accuracy_best)}\")\n    if training_loss_final is not None:\n        print(f\"  Training loss (final): {format_value(training_loss_final)}\")\n    if validation_loss_final is not None:\n        print(f\"  Validation loss (final): {format_value(validation_loss_final)}\")\n    if validation_loss_best is not None:\n        print(f\"  Validation loss (best): {format_value(validation_loss_best)}\")\n\n    test_metrics = metrics.get(\"test\", [])\n    if test_metrics:\n        _, test_value = test_metrics[-1]\n        if isinstance(test_value, dict):\n            if \"frozen_acc\" in test_value:\n                print(\n                    f\"  Test shifted-stream accuracy (frozen adaptation): {format_value(test_value['frozen_acc'])}\"\n                )\n            if \"always_acc\" in test_value:\n                print(\n                    f\"  Test shifted-stream accuracy (always adaptation): {format_value(test_value['always_acc'])}\"\n                )\n            if \"gated_acc\" in test_value:\n                print(\n                    f\"  Test shifted-stream accuracy (gated adaptation): {format_value(test_value['gated_acc'])}\"\n                )\n        else:\n            print(f\"  Test metric (final): {format_value(test_value)}\")\n\n    for mode_name, result_dict in stream_results.items():\n        accuracy_key = \"Shifted-Stream Accuracy\"\n        if accuracy_key in result_dict:\n            print(\n                f\"  Shifted-stream accuracy ({mode_name}): {format_value(result_dict[accuracy_key])}\"\n            )\n        if \"trigger_rate\" in result_dict:\n            print(\n                f\"  Adaptation trigger rate ({mode_name}): {format_value(result_dict['trigger_rate'])}\"\n            )\n\n    print()\n"], "parse_term_out": ["['Dataset: synthetic_reasoning_stream', '\\n', '  Train accuracy (final):\n0.992800', '\\n', '  Validation accuracy (final): 0.980000', '\\n', '  Validation\naccuracy (best): 0.984000', '\\n', '  Training loss (final): 0.058027', '\\n', '\nValidation loss (final): 0.059878', '\\n', '  Validation loss (best): 0.059878',\n'\\n', '  Test shifted-stream accuracy (frozen adaptation): 0.838750', '\\n', '\nTest shifted-stream accuracy (always adaptation): 0.833750', '\\n', '  Test\nshifted-stream accuracy (gated adaptation): 0.843750', '\\n', '  Shifted-stream\naccuracy (frozen): 0.838750', '\\n', '  Adaptation trigger rate (frozen):\n0.000000', '\\n', '  Shifted-stream accuracy (always): 0.833750', '\\n', '\nAdaptation trigger rate (always): 1.000000', '\\n', '  Shifted-stream accuracy\n(gated): 0.843750', '\\n', '  Adaptation trigger rate (gated): 0.076250', '\\n',\n'\\n', 'Execution time: a moment seconds (time limit is 2 hours).']", "['Dataset: synthetic_reasoning_stream', '\\n', '  Train accuracy (final):\n0.992800', '\\n', '  Validation accuracy (final): 0.980000', '\\n', '  Validation\naccuracy (best): 0.984000', '\\n', '  Training loss (final): 0.058027', '\\n', '\nValidation loss (final): 0.059878', '\\n', '  Validation loss (best): 0.059878',\n'\\n', '  Test shifted-stream accuracy (frozen adaptation): 0.838750', '\\n', '\nTest shifted-stream accuracy (always adaptation): 0.833750', '\\n', '  Test\nshifted-stream accuracy (gated adaptation): 0.843750', '\\n', '  Shifted-stream\naccuracy (frozen): 0.838750', '\\n', '  Adaptation trigger rate (frozen):\n0.000000', '\\n', '  Shifted-stream accuracy (always): 0.833750', '\\n', '\nAdaptation trigger rate (always): 1.000000', '\\n', '  Shifted-stream accuracy\n(gated): 0.843750', '\\n', '  Adaptation trigger rate (gated): 0.076250', '\\n',\n'\\n', 'Execution time: a moment seconds (time limit is 2 hours).']"], "parse_exc_type": [null, null], "parse_exc_info": [null, null], "parse_exc_stack": [null, null], "completed_stages": ["Stage_1"], "current_stage": "Stage_1"};
+
+// Add log directory path and stage info to the tree data
+treeStructData.log_dir_path = window.location.pathname.split('/').slice(0, -1).join('/');
+treeStructData.current_stage = window.location.pathname.includes('stage_')
+  ? window.location.pathname.split('stage_')[1].split('/')[0]
+  : 'Stage_1';
+
+// Initialize background color
+window.bgColCurrent = bgCol;
+
+// Function to set background color that can be called from the console
+function setBackgroundColor(color) {
+  // Update the global color
+  updateBackgroundColor(color);
+
+  // Refresh the current sketch to apply the new background color
+  if (currentStage) {
+    startSketch(currentStage);
+  }
+}
+
+// Load all stage data and initialize the visualization
+loadAllStageData(treeStructData);
+
+    </script>
+    <title>AI Scientist-v2 Visualization</title>
+    <style>
+      body,
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background-color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      #canvas-container {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 40vw;
+        height: 100vh;
+        background-color: inherit;
+        padding-top: 40px;
+      }
+      canvas {
+        float: left;
+        height: 100vh;
+        width: 100vw;
+      }
+      #text-container {
+        float: right;
+        height: 100vh;
+        width: 50vw;
+        background-color: #282c34;
+        overflow: auto;
+      }
+      #plan {
+        /* border-left: 2px solid #282c34; */
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+      }
+      #plot_plan {
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+        white-space: pre-wrap;
+      }
+      #exec_time_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exec_time {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exc_info {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #2c1f1f;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #metrics {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+      }
+      #vlm_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #1f2c2f;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      #vlm_feedback p {
+        margin: 0.5em 0;
+        white-space: pre-wrap;
+      }
+      .datasets_successfully_tested {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      .plots-container {
+        float: right;
+        width: 50vw;
+        padding: 1rem;
+        background-color: #282c34;
+        margin-top: 1rem;
+      }
+
+      .plot-item {
+        flex: 1 1 300px;
+        max-width: 100%;
+        margin-bottom: 1rem;
+        white-space: pre-wrap;
+      }
+
+      .plot-item img {
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: block;
+      }
+
+      .metric-group {
+        margin-bottom: 20px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+
+      .metric-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+
+      .metric-table th,
+      .metric-table td {
+        padding: 8px;
+        text-align: left;
+        border: 1px solid #ddd;
+      }
+
+      .metric-table th {
+        background-color: #363b44;
+      }
+
+      /* Styles for tabs */
+      .tabs-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 49vw;
+        background-color: #000000;
+        z-index: 10;
+        display: flex;
+        padding: 0;
+      }
+
+      .tab {
+        cursor: pointer;
+        padding: 10px 15px;
+        background-color: #333;
+        color: #f2f0e7;
+        border: none;
+        outline: none;
+        transition: background-color 0.3s;
+        flex: 1;
+        text-align: center;
+      }
+
+      .tab:hover {
+        background-color: #444;
+      }
+
+      .tab.active {
+        background-color: #4c76af;
+        font-weight: bold;
+      }
+
+      .tab.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background-color: #282c34;
+      }
+
+      .tab-content {
+        display: none;
+        padding-top: 40px; /* Space for tabs */
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .stage-info {
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        margin-bottom: 10px;
+        font-size: 0.9em;
+      }
+
+      .stage-status {
+        display: inline-block;
+        padding: 3px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+        font-size: 0.8em;
+      }
+
+      .stage-status.completed {
+        background-color: #4caf50;
+      }
+
+      .stage-status.in-progress {
+        background-color: #2196f3;
+      }
+
+      .stage-status.not-started {
+        background-color: #9e9e9e;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tabs-container" id="stage-tabs">
+      <button class="tab" data-stage="Stage_1" onclick="selectStage('Stage_1')">Stage 1</button>
+      <button class="tab" data-stage="Stage_2" onclick="selectStage('Stage_2')">Stage 2</button>
+      <button class="tab" data-stage="Stage_3" onclick="selectStage('Stage_3')">Stage 3</button>
+      <button class="tab" data-stage="Stage_4" onclick="selectStage('Stage_4')">Stage 4</button>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <pre id="text-container">
+        <div id="stage-info" class="stage-info"></div>
+        <div id="plan"></div>
+        <hr>
+        <div id="exc_info"></div>
+        <hr>
+        <div id="exec_time"></div>
+        <hr>
+        <div id="exec_time_feedback"></div>
+        <hr>
+        <div id="metrics"></div>
+        <hr>
+        <div id="plot_plan"></div>
+        <hr>
+        <div class="plots-container" id="plots"></div>
+        <hr>
+        <div id="vlm_feedback"></div>
+        <hr>
+        <div id="datasets_successfully_tested"></div>
+        <hr>
+        <code id="code" class="language-python"></code>
+        <hr>
+        <code id="plot_code" class="language-python"></code>
+    </pre>
+  </body>
+</html>
