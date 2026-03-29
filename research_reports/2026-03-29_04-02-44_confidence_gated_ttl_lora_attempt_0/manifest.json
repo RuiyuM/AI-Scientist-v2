@@ -1,53 +1,58 @@
 {
   "source_experiment_dir": "experiments/2026-03-29_04-02-44_confidence_gated_ttl_lora_attempt_0",
   "snapshot_dir": "research_reports/2026-03-29_04-02-44_confidence_gated_ttl_lora_attempt_0",
-  "snapshot_time_utc": "2026-03-29T04:04:53.251932+00:00",
-  "file_count": 9,
+  "snapshot_time_utc": "2026-03-29T04:05:46.291833+00:00",
+  "file_count": 10,
   "files": [
     {
       "path": "bfts_config.yaml",
       "size_bytes": 1170,
-      "mtime_utc": "2026-03-29T04:04:53.215508+00:00"
+      "mtime_utc": "2026-03-29T04:05:46.252909+00:00"
     },
     {
       "path": "idea.json",
       "size_bytes": 4725,
-      "mtime_utc": "2026-03-29T04:04:53.207508+00:00"
+      "mtime_utc": "2026-03-29T04:05:46.248909+00:00"
     },
     {
       "path": "idea.md",
       "size_bytes": 4579,
-      "mtime_utc": "2026-03-29T04:04:53.205508+00:00"
+      "mtime_utc": "2026-03-29T04:05:46.243909+00:00"
+    },
+    {
+      "path": "manifest.json",
+      "size_bytes": 1748,
+      "mtime_utc": "2026-03-29T04:04:53.250509+00:00"
     },
     {
       "path": "logs/0-run/unified_tree_viz.html",
       "size_bytes": 54101,
-      "mtime_utc": "2026-03-29T04:04:53.222508+00:00"
+      "mtime_utc": "2026-03-29T04:05:46.256909+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/best_solution_c4418f0f5e9d4658b5b0662ec0c256ed.py",
       "size_bytes": 12378,
-      "mtime_utc": "2026-03-29T04:04:53.239508+00:00"
+      "mtime_utc": "2026-03-29T04:05:46.280909+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/config.yaml",
       "size_bytes": 1689,
-      "mtime_utc": "2026-03-29T04:04:53.232508+00:00"
+      "mtime_utc": "2026-03-29T04:05:46.272909+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/journal.json",
       "size_bytes": 23271,
-      "mtime_utc": "2026-03-29T04:04:53.228508+00:00"
+      "mtime_utc": "2026-03-29T04:05:46.267909+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/tree_plot.html",
       "size_bytes": 54073,
-      "mtime_utc": "2026-03-29T04:04:53.236508+00:00"
+      "mtime_utc": "2026-03-29T04:05:46.277909+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/notes/stage_progress.json",
       "size_bytes": 12789,
-      "mtime_utc": "2026-03-29T04:04:53.226508+00:00"
+      "mtime_utc": "2026-03-29T04:05:46.263909+00:00"
     }
   ]
 }
