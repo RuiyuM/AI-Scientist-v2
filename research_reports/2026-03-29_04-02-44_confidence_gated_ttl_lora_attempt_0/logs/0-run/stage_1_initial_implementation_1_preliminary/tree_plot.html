@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Check if we're running under Live Server
+      if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+          let lastModified = '';
+
+          // Check for file changes every second
+          setInterval(async () => {
+              try {
+                  const response = await fetch(window.location.href, { method: 'HEAD' });
+                  // get a timestamp that shows when the file was last changed
+                  const currentModified = response.headers.get('last-modified');
+
+                  if (lastModified && lastModified !== currentModified) {
+                      window.location.reload();
+                  }
+
+                  lastModified = currentModified;
+              } catch (e) {
+                  console.error('Error checking for updates:', e);
+              }
+          }, 1000);
+      }
+  </script>
+    <script
+      id="p5scripttag"
+      src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"
+      integrity="sha512-uaz5GpnQoE6t5echKlX8P52czvsIGgLPcvlzfvRubLZ1Hp8JemUDnbUiAahbVtPb+jUVrNETuXvAhDDF/N3M4w=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+
+    <script>
+      const bgCol = "#FFFFFF";
+const accentCol = "#1a439e";
+
+hljs.initHighlightingOnLoad();
+
+// Function to update background color globally
+function updateBackgroundColor(color) {
+  // Update the JS variable
+  window.bgColCurrent = color;
+
+  // Update body background
+  document.body.style.backgroundColor = color;
+
+  // Update canvas container background
+  const canvasContainer = document.getElementById('canvas-container');
+  if (canvasContainer) {
+    canvasContainer.style.backgroundColor = color;
+  }
+}
+
+// Store tree data for each stage
+const stageData = {
+  Stage_1: null,
+  Stage_2: null,
+  Stage_3: null,
+  Stage_4: null
+};
+
+// Keep track of current selected stage
+let currentStage = null;
+let currentSketch = null;
+let availableStages = [];
+
+// Class definitions for nodes and edges
+class Node {
+  constructor(x, y, id, isRoot = false) {
+    this.x = x;
+    this.y = y;
+    this.id = id;
+    this.visible = isRoot; // Only root nodes are visible initially
+    this.appearProgress = 0;
+    this.popEffect = 0;
+    this.selected = false;
+    this.isRootNode = isRoot;
+  }
+
+  update() {
+    if (this.visible) {
+      // Handle the main appearance animation
+      if (this.appearProgress < 1) {
+        this.appearProgress += 0.06;
+
+        // When we reach full size, trigger the pop effect
+        if (this.appearProgress >= 1) {
+          this.appearProgress = 1; // Cap at 1
+          this.popEffect = 1; // Start the pop effect
+        }
+      }
+
+      // Handle the pop effect animation
+      if (this.popEffect > 0) {
+        this.popEffect -= 0.15; // Control how quickly it shrinks back
+        if (this.popEffect < 0) this.popEffect = 0; // Don't go negative
+      }
+    }
+  }
+
+  startAnimation() {
+    this.visible = true;
+  }
+
+  color() {
+    if (this.selected) {
+      return accentCol; // Use the global accent color variable for selected node
+    }
+    return '#4263eb'; // Default blue color
+  }
+
+  render(p5) {
+    if (this.visible) {
+      const popBonus = this.popEffect * 0.1;
+      const nodeScale = p5.map(this.appearProgress, 0, 1, 0, 1) + popBonus;
+      const alpha = p5.map(this.appearProgress, 0, 1, 0, 255);
+
+      p5.push();
+      p5.translate(this.x, this.y);
+
+      // Shadow effect
+      p5.noStroke();
+      p5.rectMode(p5.CENTER);
+
+      for (let i = 1; i <= 4; i++) {
+        p5.fill(0, 0, 0, alpha * 0.06);
+        p5.rect(i, i, 30 * nodeScale, 30 * nodeScale, 10);
+      }
+
+      // Main square - use node's color with alpha
+      let nodeColor = p5.color(this.color());
+      nodeColor.setAlpha(alpha);
+      p5.fill(nodeColor);
+      p5.rect(0, 0, 30 * nodeScale, 30 * nodeScale, 10);
+
+      // Draw checkmark icon if the node is selected
+      if (this.selected && this.appearProgress >= 1) {
+        p5.stroke(255);
+        p5.strokeWeight(2 * nodeScale);
+        p5.noFill();
+        // Draw checkmark
+        p5.beginShape();
+        p5.vertex(-8, 0);
+        p5.vertex(-3, 5);
+        p5.vertex(8, -6);
+        p5.endShape();
+      }
+
+      p5.pop();
+    }
+  }
+
+  isMouseOver(p5) {
+    return this.visible &&
+           p5.mouseX > this.x - 15 &&
+           p5.mouseX < this.x + 15 &&
+           p5.mouseY > this.y - 15 &&
+           p5.mouseY < this.y + 15;
+  }
+
+  // Connect this node to a child node
+  child(childNode) {
+    // Create an edge from this node to the child
+    let isLeft = childNode.x < this.x;
+    let isRight = childNode.x > this.x;
+    let edge = new Edge(this, childNode, isLeft, isRight);
+    return edge;
+  }
+}
+
+class Edge {
+  constructor(parent, child, isLeft, isRight) {
+    this.parent = parent;
+    this.child = child;
+    this.isLeft = isLeft;
+    this.isRight = isRight;
+    this.progress = 0;
+
+    // Calculate the midpoint where branching occurs
+    this.midY = parent.y + (child.y - parent.y) * 0.6;
+
+    // Use the actual child x-coordinate
+    // This ensures the edge will connect directly to the child node
+    this.branchX = child.x;
+  }
+
+  update() {
+    if (this.parent.visible && this.progress < 1) {
+      this.progress += 0.01; // Adjust animation speed
+    }
+    if (this.progress >= 1) {
+      this.child.visible = true;
+    }
+  }
+
+  color() {
+    return this.child.color();
+  }
+
+  render(p5) {
+    if (!this.parent.visible) return;
+
+    // Calculate path lengths
+    const verticalDist1 = this.midY - this.parent.y;
+    const horizontalDist = Math.abs(this.branchX - this.parent.x);
+    const verticalDist2 = this.child.y - this.midY;
+    const totalLength = verticalDist1 + horizontalDist + verticalDist2;
+
+    // Calculate how much of each segment to draw
+    const currentLength = totalLength * this.progress;
+
+    p5.stroke(180, 190, 205);
+    p5.strokeWeight(1.5);
+    p5.noFill();
+
+    // Always draw the first vertical segment from parent
+    if (currentLength > 0) {
+      const firstSegmentLength = Math.min(currentLength, verticalDist1);
+      const currentMidY = p5.lerp(this.parent.y, this.midY, firstSegmentLength / verticalDist1);
+      p5.line(this.parent.x, this.parent.y, this.parent.x, currentMidY);
+    }
+
+    if (currentLength > verticalDist1) {
+      // Draw second segment (horizontal)
+      const secondSegmentLength = Math.min(currentLength - verticalDist1, horizontalDist);
+      const currentBranchX = p5.lerp(this.parent.x, this.branchX, secondSegmentLength / horizontalDist);
+      p5.line(this.parent.x, this.midY, currentBranchX, this.midY);
+
+      if (currentLength > verticalDist1 + horizontalDist) {
+        // Draw third segment (vertical to child)
+        const thirdSegmentLength = currentLength - verticalDist1 - horizontalDist;
+        const currentChildY = p5.lerp(this.midY, this.child.y, thirdSegmentLength / verticalDist2);
+        p5.line(this.branchX, this.midY, this.branchX, currentChildY);
+      }
+    }
+  }
+}
+
+// Create a modified sketch for each stage
+function createTreeSketch(stageId) {
+  return function(p5) {
+    let nodes = [];
+    let edges = [];
+    let treeData = stageData[stageId];
+
+    p5.setup = function() {
+      const canvas = p5.createCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+      canvas.parent('canvas-container');
+      p5.smooth();
+      p5.frameRate(60);
+
+      if (treeData) {
+        createTreeFromData(treeData);
+      }
+    };
+
+    p5.windowResized = function() {
+      p5.resizeCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+    };
+
+    function createTreeFromData(data) {
+      // Clear existing nodes and edges
+      nodes = [];
+      edges = [];
+
+      // Add defensive checks to prevent errors
+      if (!data || !data.layout || !Array.isArray(data.layout) || !data.edges || !Array.isArray(data.edges)) {
+        console.error("Invalid tree data format:", data);
+        return; // Exit if data structure is invalid
+      }
+
+      // Find all parent nodes in edges
+      const parentNodes = new Set();
+      for (const [parentId, childId] of data.edges) {
+        parentNodes.add(parentId);
+      }
+
+      // Create nodes
+      for (let i = 0; i < data.layout.length; i++) {
+        const [nx, ny] = data.layout[i];
+        // A node is a root if it's a parent and not a child in any edge
+        const isRoot = parentNodes.has(i) && data.edges.every(edge => edge[1] !== i);
+
+        const node = new Node(
+          nx * p5.width * 0.8 + p5.width * 0.1,
+          ny * p5.height * 0.8 + p5.height * 0.1,
+          i,
+          isRoot
+        );
+        nodes.push(node);
+      }
+
+      // If no root was found, make the first parent node visible
+      if (!nodes.some(node => node.visible) && parentNodes.size > 0) {
+        // Get the first parent node
+        const firstParentId = [...parentNodes][0];
+        if (nodes[firstParentId]) {
+          nodes[firstParentId].visible = true;
+        }
+      }
+
+      // Create edges
+      for (const [parentId, childId] of data.edges) {
+        const parent = nodes[parentId];
+        const child = nodes[childId];
+        if (parent && child) { // Verify both nodes exist
+          const isLeft = child.x < parent.x;
+          const isRight = child.x > parent.x;
+          edges.push(new Edge(parent, child, isLeft, isRight));
+        }
+      }
+
+      // Select the first node by default
+      if (nodes.length > 0) {
+        nodes[0].selected = true;
+        updateNodeInfo(0);
+      }
+    }
+
+    p5.draw = function() {
+      // Use the global background color if available, otherwise use the default bgCol
+      const currentBgColor = window.bgColCurrent || bgCol;
+      p5.background(currentBgColor);
+
+      // Update and render edges
+      for (const edge of edges) {
+        edge.update();
+        edge.render(p5);
+      }
+
+      // Update and render nodes
+      for (const node of nodes) {
+        node.update();
+        node.render(p5);
+      }
+
+      // Handle mouse hover
+      p5.cursor(p5.ARROW);
+      for (const node of nodes) {
+        if (node.isMouseOver(p5)) {
+          p5.cursor(p5.HAND);
+        }
+      }
+    };
+
+    p5.mousePressed = function() {
+      // Check if any node was clicked
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].visible && nodes[i].isMouseOver(p5)) {
+          // Deselect all nodes
+          nodes.forEach(n => n.selected = false);
+          // Select the clicked node
+          nodes[i].selected = true;
+          // Update the right panel with node info
+          updateNodeInfo(i);
+          break;
+        }
+      }
+    };
+
+    function updateNodeInfo(nodeIndex) {
+      if (treeData) {
+        setNodeInfo(
+          treeData.code[nodeIndex],
+          treeData.plan[nodeIndex],
+          treeData.plot_code?.[nodeIndex],
+          treeData.plot_plan?.[nodeIndex],
+          treeData.metrics?.[nodeIndex],
+          treeData.exc_type?.[nodeIndex] || '',
+          treeData.exc_info?.[nodeIndex]?.args?.[0] || '',
+          treeData.exc_stack?.[nodeIndex] || [],
+          treeData.plots?.[nodeIndex] || [],
+          treeData.plot_analyses?.[nodeIndex] || [],
+          treeData.vlm_feedback_summary?.[nodeIndex] || '',
+          treeData.datasets_successfully_tested?.[nodeIndex] || [],
+          treeData.exec_time_feedback?.[nodeIndex] || '',
+          treeData.exec_time?.[nodeIndex] || ''
+        );
+      }
+    }
+  };
+}
+
+// Start a new p5 sketch for the given stage
+function startSketch(stageId) {
+  if (currentSketch) {
+    currentSketch.remove();
+  }
+
+  if (stageData[stageId]) {
+    currentSketch = new p5(createTreeSketch(stageId));
+
+    // Update stage info
+    const stageNumber = stageId.split('_')[1];
+    let stageDesc = '';
+    switch(stageId) {
+      case 'Stage_1': stageDesc = 'Preliminary Investigation'; break;
+      case 'Stage_2': stageDesc = 'Baseline Tuning'; break;
+      case 'Stage_3': stageDesc = 'Research Agenda Execution'; break;
+      case 'Stage_4': stageDesc = 'Ablation Studies'; break;
+    }
+
+    document.getElementById('stage-info').innerHTML =
+      `<strong>Current Stage: ${stageNumber} - ${stageDesc}</strong>`;
+  }
+}
+
+// Handle tab selection
+function selectStage(stageId) {
+  if (!stageData[stageId] || !availableStages.includes(stageId)) {
+    return; // Don't allow selection of unavailable stages
+  }
+
+  // Update active tab styles
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  document.querySelector(`.tab[data-stage="${stageId}"]`).classList.add('active');
+
+  // Start the new sketch
+  currentStage = stageId;
+  startSketch(stageId);
+}
+
+// Function to load the tree data for all stages
+async function loadAllStageData(baseTreeData) {
+  console.log("Loading stage data with base data:", baseTreeData);
+
+  // The base tree data is for the current stage
+  const currentStageId = baseTreeData.current_stage || 'Stage_1';
+
+  // Ensure base tree data is valid and has required properties
+  if (baseTreeData && baseTreeData.layout && baseTreeData.edges) {
+    stageData[currentStageId] = baseTreeData;
+    availableStages.push(currentStageId);
+    console.log(`Added current stage ${currentStageId} to available stages`);
+  } else {
+    console.warn(`Current stage ${currentStageId} data is invalid:`, baseTreeData);
+  }
+
+  // Use relative path to load other stage trees
+  const logDirPath = baseTreeData.log_dir_path || '.';
+  console.log("Log directory path:", logDirPath);
+
+  // Load data for each stage if available
+  const stageNames = ['Stage_1', 'Stage_2', 'Stage_3', 'Stage_4'];
+  const stageNames2actualNames = {
+    'Stage_1': 'stage_1_initial_implementation_1_preliminary',
+    'Stage_2': 'stage_2_baseline_tuning_1_first_attempt',
+    'Stage_3': 'stage_3_creative_research_1_first_attempt',
+    'Stage_4': 'stage_4_ablation_studies_1_first_attempt'
+    }
+
+  for (const stage of stageNames) {
+
+    if (baseTreeData.completed_stages && baseTreeData.completed_stages.includes(stage)) {
+      try {
+        console.log(`Attempting to load data for ${stage} from ${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+        const response = await fetch(`${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+
+        if (response.ok) {
+          const data = await response.json();
+
+          // Validate the loaded data
+          if (data && data.layout && data.edges) {
+            stageData[stage] = data;
+            availableStages.push(stage);
+            console.log(`Successfully loaded and validated data for ${stage}`);
+          } else {
+            console.warn(`Loaded data for ${stage} is invalid:`, data);
+          }
+        } else {
+          console.warn(`Failed to load data for ${stage} - HTTP status ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`Error loading data for ${stage}:`, error);
+      }
+    } else {
+      console.log(`Skipping stage ${stage} - not in completed stages list:`, baseTreeData.completed_stages);
+    }
+  }
+
+  // Update tab visibility based on available stages
+  updateTabVisibility();
+
+  // Start with the first available stage
+  if (availableStages.length > 0) {
+    selectStage(availableStages[0]);
+  } else {
+    console.warn("No stages available to display");
+    // Display a message in the canvas area
+    document.getElementById('canvas-container').innerHTML =
+      '<div style="padding: 20px; color: #333; text-align: center;"><h3>No valid tree data available to display</h3></div>';
+  }
+}
+
+// Update tab visibility based on available stages
+function updateTabVisibility() {
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(tab => {
+    const stageId = tab.getAttribute('data-stage');
+    if (availableStages.includes(stageId)) {
+      tab.classList.remove('disabled');
+    } else {
+      tab.classList.add('disabled');
+    }
+  });
+}
+
+// Utility function to set the node info in the right panel
+const setNodeInfo = (code, plan, plot_code, plot_plan, metrics = null, exc_type = '', exc_info = '',
+    exc_stack = [], plots = [], plot_analyses = [], vlm_feedback_summary = '',
+    datasets_successfully_tested = [], exec_time_feedback = '', exec_time = '') => {
+  const codeElm = document.getElementById("code");
+  if (codeElm) {
+    if (code) {
+      codeElm.innerHTML = hljs.highlight(code, { language: "python" }).value;
+    } else {
+      codeElm.innerHTML = '<p>No code available</p>';
+    }
+  }
+
+  const planElm = document.getElementById("plan");
+  if (planElm) {
+    if (plan) {
+      planElm.innerHTML = hljs.highlight(plan, { language: "plaintext" }).value;
+    } else {
+      planElm.innerHTML = '<p>No plan available</p>';
+    }
+  }
+
+  const plot_codeElm = document.getElementById("plot_code");
+  if (plot_codeElm) {
+    if (plot_code) {
+      plot_codeElm.innerHTML = hljs.highlight(plot_code, { language: "python" }).value;
+    } else {
+      plot_codeElm.innerHTML = '<p>No plot code available</p>';
+    }
+  }
+
+  const plot_planElm = document.getElementById("plot_plan");
+  if (plot_planElm) {
+    if (plot_plan) {
+      plot_planElm.innerHTML = hljs.highlight(plot_plan, { language: "plaintext" }).value;
+    } else {
+      plot_planElm.innerHTML = '<p>No plot plan available</p>';
+    }
+  }
+
+  const metricsElm = document.getElementById("metrics");
+  if (metricsElm) {
+      let metricsContent = `<h3>Metrics:</h3>`;
+      if (metrics && metrics.metric_names) {
+          for (const metric of metrics.metric_names) {
+              metricsContent += `<div class="metric-group">`;
+              metricsContent += `<h4>${metric.metric_name}</h4>`;
+              metricsContent += `<p><strong>Description:</strong> ${metric.description || 'N/A'}</p>`;
+              metricsContent += `<p><strong>Optimization:</strong> ${metric.lower_is_better ? 'Minimize' : 'Maximize'}</p>`;
+
+              // Create table for dataset values
+              metricsContent += `<table class="metric-table">
+                  <tr>
+                      <th>Dataset</th>
+                      <th>Final Value</th>
+                      <th>Best Value</th>
+                  </tr>`;
+
+              for (const dataPoint of metric.data) {
+                  metricsContent += `<tr>
+                      <td>${dataPoint.dataset_name}</td>
+                      <td>${dataPoint.final_value?.toFixed(4) || 'N/A'}</td>
+                      <td>${dataPoint.best_value?.toFixed(4) || 'N/A'}</td>
+                  </tr>`;
+              }
+
+              metricsContent += `</table></div>`;
+          }
+      } else if (metrics === null) {
+          metricsContent += `<p>No metrics available</p>`;
+      }
+      metricsElm.innerHTML = metricsContent;
+  }
+
+  // Add plots display
+  const plotsElm = document.getElementById("plots");
+  if (plotsElm) {
+      if (plots && plots.length > 0) {
+          let plotsContent = '';
+          plots.forEach(plotPath => {
+              plotsContent += `
+                  <div class="plot-item">
+                      <img src="${plotPath}" alt="Experiment Plot" onerror="console.error('Failed to load plot:', this.src)"/>
+                  </div>`;
+          });
+          plotsElm.innerHTML = plotsContent;
+      } else {
+          plotsElm.innerHTML = '';
+      }
+  }
+
+  // Add error info display
+  const errorElm = document.getElementById("exc_info");
+  if (errorElm) {
+    if (exc_type) {
+      let errorContent = `<h3 style="color: #ff5555">Exception Information:</h3>
+                          <p><strong>Type:</strong> ${exc_type}</p>`;
+
+      if (exc_info) {
+        errorContent += `<p><strong>Details:</strong> <pre>${JSON.stringify(exc_info, null, 2)}</pre></p>`;
+      }
+
+      if (exc_stack) {
+        errorContent += `<p><strong>Stack Trace:</strong> <pre>${exc_stack.join('\n')}</pre></p>`;
+      }
+
+      errorElm.innerHTML = errorContent;
+    } else {
+      errorElm.innerHTML = "No exception info available";
+    }
+  }
+
+  const exec_timeElm = document.getElementById("exec_time");
+  if (exec_timeElm) {
+    let exec_timeContent = '<div id="exec_time"><h3>Execution Time (in seconds):</h3><p>' + exec_time + '</p></div>';
+    exec_timeElm.innerHTML = exec_timeContent;
+  }
+
+  const exec_time_feedbackElm = document.getElementById("exec_time_feedback");
+  if (exec_time_feedbackElm) {
+    let exec_time_feedbackContent = '<div id="exec_time_feedback_content">'
+    exec_time_feedbackContent += '<h3>Execution Time Feedback:</h3>'
+    exec_time_feedbackContent += '<p>' + exec_time_feedback + '</p>'
+    exec_time_feedbackContent += '</div>';
+    exec_time_feedbackElm.innerHTML = exec_time_feedbackContent;
+  }
+
+  const vlm_feedbackElm = document.getElementById("vlm_feedback");
+  if (vlm_feedbackElm) {
+      let vlm_feedbackContent = '';
+
+      if (plot_analyses && plot_analyses.length > 0) {
+          vlm_feedbackContent += `<h3>Plot Analysis:</h3>`;
+          plot_analyses.forEach(analysis => {
+              if (analysis && analysis.plot_path) {  // Add null check
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <h4>Analysis for ${analysis.plot_path.split('/').pop()}</h4>
+                          <p>${analysis.analysis || 'No analysis available'}</p>
+                          <ul class="key-findings">
+                              ${(analysis.key_findings || []).map(finding => `<li>${finding}</li>`).join('')}
+                          </ul>
+                      </div>`;
+              } else {
+                  console.warn('Received invalid plot analysis:', analysis);
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <p>Invalid plot analysis data received</p>
+                      </div>`;
+              }
+          });
+      }
+
+      // Add actionable insights if available
+      if (vlm_feedback_summary && typeof vlm_feedback_summary === 'string') {
+          vlm_feedbackContent += `
+              <div class="vlm_feedback">
+                  <h3>VLM Feedback Summary:</h3>
+                  <p>${vlm_feedback_summary}</p>
+              </div>`;
+      }
+
+      console.log("Datasets successfully tested:", datasets_successfully_tested);
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          vlm_feedbackContent += `
+              <div id="datasets_successfully_tested">
+                  <h3>Datasets Successfully Tested:</h3>
+                  <p>${datasets_successfully_tested.join(', ')}</p>
+              </div>`;
+      }
+
+      if (!vlm_feedbackContent) {
+          vlm_feedbackContent = '<p>No insights available for this experiment.</p>';
+      }
+
+      vlm_feedbackElm.innerHTML = vlm_feedbackContent;
+  }
+
+  const datasets_successfully_testedElm = document.getElementById("datasets_successfully_tested");
+  if (datasets_successfully_testedElm) {
+      let datasets_successfully_testedContent = '';
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          datasets_successfully_testedContent = `<h3>Datasets Successfully Tested:</h3><ul>`;
+          datasets_successfully_tested.forEach(dataset => {
+              datasets_successfully_testedContent += `<li>${dataset}</li>`;
+          });
+          datasets_successfully_testedContent += `</ul>`;
+      } else {
+          datasets_successfully_testedContent = '<p>No datasets tested yet</p>';
+      }
+      datasets_successfully_testedElm.innerHTML = datasets_successfully_testedContent;
+  }
+};
+
+// Initialize with the provided tree data
+const treeStructData = {"edges": [], "layout": [[0.5, 0.0]], "plan": ["I will implement a compact synthetic shifted-stream multiple-choice reasoning\nsetup that mimics the paper idea without depending on large external models. A\nsmall frozen MLP backbone will be trained on an in-distribution source split,\nand a lightweight LoRA-style low-rank adapter on the classifier head will be\nused for test-time adaptation. The evaluation stream will mix easy in-\ndistribution examples with shifted harder examples, and confidence gating will\ntrigger adaptation only when prediction entropy is high. For each test example,\nI will compare three baselines: no adaptation, always-on adaptation, and\nconfidence-gated adaptation, all using self-supervised entropy minimization so\nlabels are never used during adaptation. To keep the implementation stable, the\nadapter will be reset from a shared initial state before each stream evaluation,\nwhich gives a clean preliminary baseline for selective test-time LoRA. I will\nreport shifted-stream accuracy and validation loss, save metrics/predictions to\ndisk, and generate a visualization of confidence and correctness over the\nstream. This first experiment is deliberately simple but functional, and it\ndirectly tests the hypothesis that selective adaptation is safer than adapting\non every uncertain example. The code is fully self-contained, runs on CPU or\nGPU, and can be extended later to Hugging Face text or multimodal benchmarks."], "code": ["import os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport copy\nimport time\nimport numpy as np\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nfrom torch.utils.data import Dataset, DataLoader\nimport matplotlib.pyplot as plt\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(42)\nnp.random.seed(42)\n\nexperiment_data = {\n    \"synthetic_shift_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"losses\": {\"train\": [], \"val\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"confidences\": [],\n        \"timestamps\": [],\n    }\n}\n\n\n# ----------------------------\n# Synthetic dataset\n# ----------------------------\nclass SyntheticReasoningDataset(Dataset):\n    def __init__(self, X, y):\n        self.X = torch.tensor(X, dtype=torch.float32)\n        self.y = torch.tensor(y, dtype=torch.long)\n\n    def __len__(self):\n        return len(self.y)\n\n    def __getitem__(self, idx):\n        return {\"x\": self.X[idx], \"y\": self.y[idx]}\n\n\ndef make_data(n, d=20, shift=False):\n    x = np.random.randn(n, d).astype(np.float32)\n    # latent rule with interactions; shifted test alters correlations and bias\n    score = (\n        1.5 * x[:, 0]\n        - 1.0 * x[:, 1]\n        + 0.8 * x[:, 2] * x[:, 3]\n        + 0.5 * np.sin(x[:, 4])\n        - 0.3 * x[:, 5] ** 2\n        + 0.2 * x[:, 6] * x[:, 7]\n    )\n    if shift:\n        x[:, :8] = 0.8 * x[:, :8] + 0.6  # feature drift\n        score = (\n            0.7 * x[:, 0]\n            - 1.2 * x[:, 1]\n            + 1.2 * x[:, 2] * x[:, 3]\n            + 0.9 * np.sin(1.5 * x[:, 4])\n            - 0.1 * x[:, 5] ** 2\n            + 0.5\n        )\n    y = np.digitize(score, bins=np.quantile(score, [1 / 3, 2 / 3]))\n    return x, y\n\n\n# ----------------------------\n# Model with LoRA-style head\n# ----------------------------\nclass LoRALinear(nn.Module):\n    def __init__(self, in_features, out_features, rank=4, alpha=1.0):\n        super().__init__()\n        self.base = nn.Linear(in_features, out_features)\n        self.base.weight.requires_grad = False\n        self.base.bias.requires_grad = False\n        self.rank = rank\n        self.alpha = alpha\n        self.A = nn.Parameter(torch.zeros(in_features, rank))\n        self.B = nn.Parameter(torch.zeros(rank, out_features))\n        nn.init.normal_(self.A, std=0.02)\n        nn.init.zeros_(self.B)\n\n    def forward(self, x):\n        base_out = self.base(x)\n        delta = x @ self.A @ self.B * (self.alpha / self.rank)\n        return base_out + delta\n\n    def reset_lora(self):\n        with torch.no_grad():\n            self.A.zero_()\n            self.B.zero_()\n\n\nclass SmallNet(nn.Module):\n    def __init__(self, d=20, h=64, num_classes=3, rank=4):\n        super().__init__()\n        self.backbone = nn.Sequential(\n            nn.Linear(d, h), nn.ReLU(), nn.Linear(h, h), nn.ReLU()\n        )\n        self.head = LoRALinear(h, num_classes, rank=rank, alpha=1.0)\n\n    def forward(self, x):\n        z = self.backbone(x)\n        return self.head(z)\n\n    def freeze_backbone(self):\n        for p in self.backbone.parameters():\n            p.requires_grad = False\n\n    def lora_parameters(self):\n        return [self.head.A, self.head.B]\n\n\n# ----------------------------\n# Data\n# ----------------------------\nd = 20\nX_train, y_train = make_data(1800, d=d, shift=False)\nX_val, y_val = make_data(400, d=d, shift=False)\n\n# Stream with mixed domains: first ID, then shifted, then mixed\nX_s1, y_s1 = make_data(120, d=d, shift=False)\nX_s2, y_s2 = make_data(160, d=d, shift=True)\nX_s3a, y_s3a = make_data(60, d=d, shift=False)\nX_s3b, y_s3b = make_data(60, d=d, shift=True)\nX_stream = np.concatenate([X_s1, X_s2, X_s3a, X_s3b], axis=0)\ny_stream = np.concatenate([y_s1, y_s2, y_s3a, y_s3b], axis=0)\n\ntrain_loader = DataLoader(\n    SyntheticReasoningDataset(X_train, y_train), batch_size=64, shuffle=True\n)\nval_loader = DataLoader(\n    SyntheticReasoningDataset(X_val, y_val), batch_size=128, shuffle=False\n)\n\n# ----------------------------\n# Train source model\n# ----------------------------\nmodel = SmallNet(d=d).to(device)\noptimizer = torch.optim.Adam(model.parameters(), lr=1e-3)\ncriterion = nn.CrossEntropyLoss()\n\nepochs = 12\nfor epoch in range(1, epochs + 1):\n    model.train()\n    train_losses, train_correct, train_total = [], 0, 0\n    for batch in train_loader:\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        x = (batch[\"x\"] - batch[\"x\"].mean(dim=0, keepdim=True)) / (\n            batch[\"x\"].std(dim=0, keepdim=True) + 1e-6\n        )\n        y = batch[\"y\"]\n        optimizer.zero_grad()\n        logits = model(x)\n        loss = criterion(logits, y)\n        loss.backward()\n        optimizer.step()\n        train_losses.append(loss.item())\n        pred = logits.argmax(dim=-1)\n        train_correct += (pred == y).sum().item()\n        train_total += y.size(0)\n\n    model.eval()\n    val_losses, val_correct, val_total = [], 0, 0\n    with torch.no_grad():\n        for batch in val_loader:\n            batch = {\n                k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n            }\n            x = (batch[\"x\"] - batch[\"x\"].mean(dim=0, keepdim=True)) / (\n                batch[\"x\"].std(dim=0, keepdim=True) + 1e-6\n            )\n            y = batch[\"y\"]\n            logits = model(x)\n            loss = criterion(logits, y)\n            val_losses.append(loss.item())\n            pred = logits.argmax(dim=-1)\n            val_correct += (pred == y).sum().item()\n            val_total += y.size(0)\n\n    train_loss = float(np.mean(train_losses))\n    val_loss = float(np.mean(val_losses))\n    train_acc = train_correct / train_total\n    val_acc = val_correct / val_total\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n    experiment_data[\"synthetic_shift_stream\"][\"metrics\"][\"train\"].append(\n        {\"epoch\": epoch, \"acc\": train_acc}\n    )\n    experiment_data[\"synthetic_shift_stream\"][\"metrics\"][\"val\"].append(\n        {\"epoch\": epoch, \"acc\": val_acc}\n    )\n    experiment_data[\"synthetic_shift_stream\"][\"losses\"][\"train\"].append(\n        {\"epoch\": epoch, \"loss\": train_loss}\n    )\n    experiment_data[\"synthetic_shift_stream\"][\"losses\"][\"val\"].append(\n        {\"epoch\": epoch, \"loss\": val_loss}\n    )\n    experiment_data[\"synthetic_shift_stream\"][\"timestamps\"].append(time.time())\n\n# Freeze backbone for test-time LoRA\nmodel.freeze_backbone()\nbase_state = copy.deepcopy(model.state_dict())\n\n\n# ----------------------------\n# Stream evaluation helpers\n# ----------------------------\ndef entropy_from_logits(logits):\n    p = F.softmax(logits, dim=-1)\n    return -(p * torch.log(p + 1e-8)).sum(dim=-1)\n\n\ndef eval_stream(mode=\"none\", entropy_threshold=0.85, adapt_lr=5e-2):\n    m = SmallNet(d=d).to(device)\n    m.load_state_dict(base_state)\n    m.freeze_backbone()\n    opt = torch.optim.SGD(m.lora_parameters(), lr=adapt_lr)\n\n    preds, confs, corrects = [], [], []\n    per_ex_losses = []\n    m.eval()\n    for i in range(len(y_stream)):\n        x = torch.tensor(X_stream[i : i + 1], dtype=torch.float32).to(device)\n        y = torch.tensor(y_stream[i : i + 1], dtype=torch.long).to(device)\n        x = (x - x.mean(dim=0, keepdim=True)) / (x.std(dim=0, keepdim=True) + 1e-6)\n\n        with torch.no_grad():\n            logits = m(x)\n            probs = F.softmax(logits, dim=-1)\n            ent = entropy_from_logits(logits).item()\n            pred = logits.argmax(dim=-1)\n            conf = probs.max(dim=-1).values.item()\n            loss = criterion(logits, y).item()\n\n        do_adapt = (mode == \"always\") or (mode == \"gated\" and ent > entropy_threshold)\n        if do_adapt:\n            m.train()\n            opt.zero_grad()\n            logits_adapt = m(x)\n            p = F.softmax(logits_adapt, dim=-1)\n            adapt_loss = (\n                -(p * torch.log(p + 1e-8)).sum(dim=-1).mean()\n            )  # entropy minimization\n            adapt_loss.backward()\n            opt.step()\n            m.eval()\n            with torch.no_grad():\n                logits = m(x)\n                probs = F.softmax(logits, dim=-1)\n                pred = logits.argmax(dim=-1)\n                conf = probs.max(dim=-1).values.item()\n                loss = criterion(logits, y).item()\n\n        preds.append(int(pred.item()))\n        confs.append(float(conf))\n        corrects.append(int(pred.item() == y.item()))\n        per_ex_losses.append(float(loss))\n\n    return {\n        \"accuracy\": float(np.mean(corrects)),\n        \"loss\": float(np.mean(per_ex_losses)),\n        \"preds\": np.array(preds),\n        \"confs\": np.array(confs),\n        \"corrects\": np.array(corrects),\n    }\n\n\n# Tune threshold on validation uncertainty scale (simple heuristic)\nmodel.eval()\nval_ents = []\nwith torch.no_grad():\n    for batch in val_loader:\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        x = (batch[\"x\"] - batch[\"x\"].mean(dim=0, keepdim=True)) / (\n            batch[\"x\"].std(dim=0, keepdim=True) + 1e-6\n        )\n        logits = model(x)\n        val_ents.extend(entropy_from_logits(logits).detach().cpu().numpy().tolist())\nentropy_threshold = float(np.quantile(val_ents, 0.75))\n\nres_none = eval_stream(\"none\", entropy_threshold=entropy_threshold)\nres_always = eval_stream(\"always\", entropy_threshold=entropy_threshold)\nres_gated = eval_stream(\"gated\", entropy_threshold=entropy_threshold)\n\nprint(\n    f\"Shifted-Stream Accuracy | no_adapt={res_none['accuracy']:.4f} always_on={res_always['accuracy']:.4f} gated={res_gated['accuracy']:.4f}\"\n)\n\nexperiment_data[\"synthetic_shift_stream\"][\"metrics\"][\"stream\"].append(\n    {\n        \"epoch\": epochs,\n        \"Shifted-Stream Accuracy/no_adapt\": res_none[\"accuracy\"],\n        \"Shifted-Stream Accuracy/always_on\": res_always[\"accuracy\"],\n        \"Shifted-Stream Accuracy/gated\": res_gated[\"accuracy\"],\n        \"stream_loss/no_adapt\": res_none[\"loss\"],\n        \"stream_loss/always_on\": res_always[\"loss\"],\n        \"stream_loss/gated\": res_gated[\"loss\"],\n        \"entropy_threshold\": entropy_threshold,\n    }\n)\nexperiment_data[\"synthetic_shift_stream\"][\"predictions\"] = {\n    \"none\": res_none[\"preds\"],\n    \"always\": res_always[\"preds\"],\n    \"gated\": res_gated[\"preds\"],\n}\nexperiment_data[\"synthetic_shift_stream\"][\"ground_truth\"] = y_stream\nexperiment_data[\"synthetic_shift_stream\"][\"confidences\"] = {\n    \"none\": res_none[\"confs\"],\n    \"always\": res_always[\"confs\"],\n    \"gated\": res_gated[\"confs\"],\n}\n\n# Save arrays\nnp.save(os.path.join(working_dir, \"stream_ground_truth.npy\"), y_stream)\nnp.save(os.path.join(working_dir, \"stream_preds_none.npy\"), res_none[\"preds\"])\nnp.save(os.path.join(working_dir, \"stream_preds_always.npy\"), res_always[\"preds\"])\nnp.save(os.path.join(working_dir, \"stream_preds_gated.npy\"), res_gated[\"preds\"])\nnp.save(os.path.join(working_dir, \"stream_confs_none.npy\"), res_none[\"confs\"])\nnp.save(os.path.join(working_dir, \"stream_confs_always.npy\"), res_always[\"confs\"])\nnp.save(os.path.join(working_dir, \"stream_confs_gated.npy\"), res_gated[\"confs\"])\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\n\n# Visualization\nidx = np.arange(len(y_stream))\nplt.figure(figsize=(12, 5))\nplt.plot(idx, res_none[\"corrects\"], label=\"No Adapt Correct\", alpha=0.8)\nplt.plot(idx, res_always[\"corrects\"], label=\"Always-on Correct\", alpha=0.8)\nplt.plot(idx, res_gated[\"corrects\"], label=\"Gated Correct\", alpha=0.8)\nplt.xlabel(\"Stream Index\")\nplt.ylabel(\"Correct (0/1)\")\nplt.title(\"Correctness over Shifted Evaluation Stream\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_shift_stream_correctness.png\"), dpi=150\n)\nplt.close()\n\nplt.figure(figsize=(12, 5))\nplt.plot(idx, res_none[\"confs\"], label=\"No Adapt Confidence\", alpha=0.8)\nplt.plot(idx, res_always[\"confs\"], label=\"Always-on Confidence\", alpha=0.8)\nplt.plot(idx, res_gated[\"confs\"], label=\"Gated Confidence\", alpha=0.8)\nplt.axhline(\n    np.exp(-entropy_threshold),\n    color=\"k\",\n    linestyle=\"--\",\n    label=\"Entropy-derived marker\",\n)\nplt.xlabel(\"Stream Index\")\nplt.ylabel(\"Max Probability Confidence\")\nplt.title(\"Confidence over Shifted Evaluation Stream\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(os.path.join(working_dir, \"synthetic_shift_stream_confidence.png\"), dpi=150)\nplt.close()\n"], "term_out": ["['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 1.0549', '\\n', 'Epoch\n2: validation_loss = 0.9639', '\\n', 'Epoch 3: validation_loss = 0.8171', '\\n',\n'Epoch 4: validation_loss = 0.6991', '\\n', 'Epoch 5: validation_loss = 0.6280',\n'\\n', 'Epoch 6: validation_loss = 0.6025', '\\n', 'Epoch 7: validation_loss =\n0.5690', '\\n', 'Epoch 8: validation_loss = 0.5537', '\\n', 'Epoch 9:\nvalidation_loss = 0.5348', '\\n', 'Epoch 10: validation_loss = 0.5212', '\\n',\n'Epoch 11: validation_loss = 0.5148', '\\n', 'Epoch 12: validation_loss =\n0.4840', '\\n', 'runfile.py:233: UserWarning: std(): degrees of freedom is <= 0.\nCorrection should be strictly less than the reduction factor (input numel\ndivided by output numel). (Triggered internally at\n/pytorch/aten/src/ATen/native/ReduceOps.cpp:1858.)\\n  x = (x - x.mean(dim=0,\nkeepdim=True)) / (x.std(dim=0, keepdim=True) + 1e-6)\\n', 'Shifted-Stream\nAccuracy | no_adapt=0.3325 always_on=0.3325 gated=0.3325', '\\n', 'Execution\ntime: a second seconds (time limit is 2 hours).']"], "analysis": ["The script runs to completion, but there is a clear implementation bug in stream\nevaluation: each stream example is normalized independently with batch size 1\nusing x.std(dim=0). For a single example, the default unbiased standard\ndeviation is undefined, triggering the warning and producing NaNs. This likely\ncorrupts logits/confidence and explains why all three methods collapse to\nidentical chance-level accuracy (~0.3325 for 3 classes). Fix by using training-\nset normalization statistics consistently for train/val/stream, or at minimum\nuse unbiased=False when computing std on small batches. Recommended fix:\nprecompute train_mean/train_std over X_train once, then normalize every split\nand every stream example with those same statistics. Also note a methodological\nissue: the \u2018base\u2019 model state is saved after training all parameters, so the\nfrozen backbone is not a pretrained frozen backbone with separately trained\nLoRA; that is acceptable for a toy prototype but should be made explicit. The\nmain actionable bug is the per-example normalization causing invalid std/NaN\nbehavior and masking any adaptation effect."], "exc_type": [null], "exc_info": [null], "exc_stack": [null], "exp_name": "0-run", "metrics": [{"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Classification accuracy on the training set.", "data": [{"dataset_name": "synthetic_shift_stream", "final_value": 0.842778, "best_value": 0.842778}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Classification accuracy on the validation set.", "data": [{"dataset_name": "synthetic_shift_stream", "final_value": 0.81, "best_value": 0.81}]}, {"metric_name": "train loss", "lower_is_better": true, "description": "Training loss.", "data": [{"dataset_name": "synthetic_shift_stream", "final_value": 0.412941, "best_value": 0.412941}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Validation loss.", "data": [{"dataset_name": "synthetic_shift_stream", "final_value": 0.483978, "best_value": 0.483978}]}, {"metric_name": "shifted-stream accuracy no adapt", "lower_is_better": false, "description": "Accuracy on the shifted stream without adaptation.", "data": [{"dataset_name": "synthetic_shift_stream", "final_value": 0.3325, "best_value": 0.3325}]}, {"metric_name": "shifted-stream accuracy always on", "lower_is_better": false, "description": "Accuracy on the shifted stream with adaptation always enabled.", "data": [{"dataset_name": "synthetic_shift_stream", "final_value": 0.3325, "best_value": 0.3325}]}, {"metric_name": "shifted-stream accuracy gated", "lower_is_better": false, "description": "Accuracy on the shifted stream with gated adaptation.", "data": [{"dataset_name": "synthetic_shift_stream", "final_value": 0.3325, "best_value": 0.3325}]}, {"metric_name": "entropy threshold", "lower_is_better": false, "description": "Entropy threshold used for gating.", "data": [{"dataset_name": "synthetic_shift_stream", "final_value": 0.754543, "best_value": 0.754543}]}]}], "is_best_node": [false], "plots": [[]], "plot_paths": [[]], "plot_analyses": [[]], "vlm_feedback_summary": ["[]"], "exec_time": [1.7930152416229248], "exec_time_feedback": [""], "datasets_successfully_tested": [[]], "plot_code": [null], "plot_plan": [null], "ablation_name": [null], "hyperparam_name": [null], "is_seed_node": [false], "is_seed_agg_node": [false], "parse_metrics_plan": ["I\u2019ll write a small script that loads `experiment_data.npy` from\n`os.path.join(os.getcwd(), \"working\")`, inspects the saved dictionary structure,\nand prints a concise summary for each dataset. For each dataset, it will report\nthe final and/or best values for the recorded training accuracy, validation\naccuracy, training loss, validation loss, and stream metrics using explicit\nmetric names. The code will avoid plots, run immediately at global scope, and\nhandle the nested list/dictionary structure used in the saved experiment file."], "parse_metrics_code": ["import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nexperiment_data_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(experiment_data_path, allow_pickle=True).item()\n\n\ndef safe_float(x):\n    try:\n        return float(x)\n    except Exception:\n        return x\n\n\ndef print_train_val_metrics(dataset_name, dataset_payload):\n    metrics = dataset_payload.get(\"metrics\", {})\n    losses = dataset_payload.get(\"losses\", {})\n\n    train_metrics = metrics.get(\"train\", [])\n    val_metrics = metrics.get(\"val\", [])\n    train_losses = losses.get(\"train\", [])\n    val_losses = losses.get(\"val\", [])\n\n    print(f\"Dataset: {dataset_name}\")\n\n    if train_metrics:\n        final_train_acc = safe_float(train_metrics[-1].get(\"acc\"))\n        best_train_acc = safe_float(\n            max(m.get(\"acc\") for m in train_metrics if \"acc\" in m)\n        )\n        print(f\"Final train accuracy: {final_train_acc:.6f}\")\n        print(f\"Best train accuracy: {best_train_acc:.6f}\")\n\n    if val_metrics:\n        final_val_acc = safe_float(val_metrics[-1].get(\"acc\"))\n        best_val_acc = safe_float(max(m.get(\"acc\") for m in val_metrics if \"acc\" in m))\n        print(f\"Final validation accuracy: {final_val_acc:.6f}\")\n        print(f\"Best validation accuracy: {best_val_acc:.6f}\")\n\n    if train_losses:\n        final_train_loss = safe_float(train_losses[-1].get(\"loss\"))\n        best_train_loss = safe_float(\n            min(m.get(\"loss\") for m in train_losses if \"loss\" in m)\n        )\n        print(f\"Final train loss: {final_train_loss:.6f}\")\n        print(f\"Best train loss: {best_train_loss:.6f}\")\n\n    if val_losses:\n        final_val_loss = safe_float(val_losses[-1].get(\"loss\"))\n        best_val_loss = safe_float(\n            min(m.get(\"loss\") for m in val_losses if \"loss\" in m)\n        )\n        print(f\"Final validation loss: {final_val_loss:.6f}\")\n        print(f\"Best validation loss: {best_val_loss:.6f}\")\n\n\ndef print_stream_metrics(dataset_name, dataset_payload):\n    stream_metrics_list = dataset_payload.get(\"metrics\", {}).get(\"stream\", [])\n    if not stream_metrics_list:\n        return\n\n    latest_stream_metrics = stream_metrics_list[-1]\n\n    for key, value in latest_stream_metrics.items():\n        if key == \"epoch\":\n            continue\n\n        readable_name = key.replace(\"_\", \" \")\n        readable_name = readable_name.replace(\"/\", \" \")\n        print(\n            f\"{readable_name}: {safe_float(value):.6f}\"\n            if isinstance(value, (int, float, np.floating))\n            else f\"{readable_name}: {value}\"\n        )\n\n\nfor dataset_name, dataset_payload in experiment_data.items():\n    print_train_val_metrics(dataset_name, dataset_payload)\n    print_stream_metrics(dataset_name, dataset_payload)\n    print()\n"], "parse_term_out": ["['Dataset: synthetic_shift_stream', '\\n', 'Final train accuracy: 0.842778',\n'\\n', 'Best train accuracy: 0.842778', '\\n', 'Final validation accuracy:\n0.810000', '\\n', 'Best validation accuracy: 0.810000', '\\n', 'Final train loss:\n0.412941', '\\n', 'Best train loss: 0.412941', '\\n', 'Final validation loss:\n0.483978', '\\n', 'Best validation loss: 0.483978', '\\n', 'Shifted-Stream\nAccuracy no adapt: 0.332500', '\\n', 'Shifted-Stream Accuracy always on:\n0.332500', '\\n', 'Shifted-Stream Accuracy gated: 0.332500', '\\n', 'stream loss\nno adapt: nan', '\\n', 'stream loss always on: nan', '\\n', 'stream loss gated:\nnan', '\\n', 'entropy threshold: 0.754543', '\\n', '\\n', 'Execution time: a moment\nseconds (time limit is 2 hours).']"], "parse_exc_type": [null], "parse_exc_info": [null], "parse_exc_stack": [null], "completed_stages": ["Stage_1"]};
+
+// Add log directory path and stage info to the tree data
+treeStructData.log_dir_path = window.location.pathname.split('/').slice(0, -1).join('/');
+treeStructData.current_stage = window.location.pathname.includes('stage_')
+  ? window.location.pathname.split('stage_')[1].split('/')[0]
+  : 'Stage_1';
+
+// Initialize background color
+window.bgColCurrent = bgCol;
+
+// Function to set background color that can be called from the console
+function setBackgroundColor(color) {
+  // Update the global color
+  updateBackgroundColor(color);
+
+  // Refresh the current sketch to apply the new background color
+  if (currentStage) {
+    startSketch(currentStage);
+  }
+}
+
+// Load all stage data and initialize the visualization
+loadAllStageData(treeStructData);
+
+    </script>
+    <title>AI Scientist-v2 Visualization</title>
+    <style>
+      body,
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background-color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      #canvas-container {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 40vw;
+        height: 100vh;
+        background-color: inherit;
+        padding-top: 40px;
+      }
+      canvas {
+        float: left;
+        height: 100vh;
+        width: 100vw;
+      }
+      #text-container {
+        float: right;
+        height: 100vh;
+        width: 50vw;
+        background-color: #282c34;
+        overflow: auto;
+      }
+      #plan {
+        /* border-left: 2px solid #282c34; */
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+      }
+      #plot_plan {
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+        white-space: pre-wrap;
+      }
+      #exec_time_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exec_time {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exc_info {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #2c1f1f;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #metrics {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+      }
+      #vlm_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #1f2c2f;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      #vlm_feedback p {
+        margin: 0.5em 0;
+        white-space: pre-wrap;
+      }
+      .datasets_successfully_tested {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      .plots-container {
+        float: right;
+        width: 50vw;
+        padding: 1rem;
+        background-color: #282c34;
+        margin-top: 1rem;
+      }
+
+      .plot-item {
+        flex: 1 1 300px;
+        max-width: 100%;
+        margin-bottom: 1rem;
+        white-space: pre-wrap;
+      }
+
+      .plot-item img {
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: block;
+      }
+
+      .metric-group {
+        margin-bottom: 20px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+
+      .metric-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+
+      .metric-table th,
+      .metric-table td {
+        padding: 8px;
+        text-align: left;
+        border: 1px solid #ddd;
+      }
+
+      .metric-table th {
+        background-color: #363b44;
+      }
+
+      /* Styles for tabs */
+      .tabs-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 49vw;
+        background-color: #000000;
+        z-index: 10;
+        display: flex;
+        padding: 0;
+      }
+
+      .tab {
+        cursor: pointer;
+        padding: 10px 15px;
+        background-color: #333;
+        color: #f2f0e7;
+        border: none;
+        outline: none;
+        transition: background-color 0.3s;
+        flex: 1;
+        text-align: center;
+      }
+
+      .tab:hover {
+        background-color: #444;
+      }
+
+      .tab.active {
+        background-color: #4c76af;
+        font-weight: bold;
+      }
+
+      .tab.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background-color: #282c34;
+      }
+
+      .tab-content {
+        display: none;
+        padding-top: 40px; /* Space for tabs */
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .stage-info {
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        margin-bottom: 10px;
+        font-size: 0.9em;
+      }
+
+      .stage-status {
+        display: inline-block;
+        padding: 3px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+        font-size: 0.8em;
+      }
+
+      .stage-status.completed {
+        background-color: #4caf50;
+      }
+
+      .stage-status.in-progress {
+        background-color: #2196f3;
+      }
+
+      .stage-status.not-started {
+        background-color: #9e9e9e;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tabs-container" id="stage-tabs">
+      <button class="tab" data-stage="Stage_1" onclick="selectStage('Stage_1')">Stage 1</button>
+      <button class="tab" data-stage="Stage_2" onclick="selectStage('Stage_2')">Stage 2</button>
+      <button class="tab" data-stage="Stage_3" onclick="selectStage('Stage_3')">Stage 3</button>
+      <button class="tab" data-stage="Stage_4" onclick="selectStage('Stage_4')">Stage 4</button>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <pre id="text-container">
+        <div id="stage-info" class="stage-info"></div>
+        <div id="plan"></div>
+        <hr>
+        <div id="exc_info"></div>
+        <hr>
+        <div id="exec_time"></div>
+        <hr>
+        <div id="exec_time_feedback"></div>
+        <hr>
+        <div id="metrics"></div>
+        <hr>
+        <div id="plot_plan"></div>
+        <hr>
+        <div class="plots-container" id="plots"></div>
+        <hr>
+        <div id="vlm_feedback"></div>
+        <hr>
+        <div id="datasets_successfully_tested"></div>
+        <hr>
+        <code id="code" class="language-python"></code>
+        <hr>
+        <code id="plot_code" class="language-python"></code>
+    </pre>
+  </body>
+</html>

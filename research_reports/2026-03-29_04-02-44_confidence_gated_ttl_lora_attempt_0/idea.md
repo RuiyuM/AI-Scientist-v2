@@ -1,0 +1,37 @@
+## Name
+
+confidence_gated_ttl_lora
+
+## Title
+
+Confidence-Gated Test-Time LoRA for Open LLM and VLM Reasoning on Hugging Face Benchmarks
+
+## Short Hypothesis
+
+Lightweight LoRA updates should help open LLMs and VLMs on shifted Hugging Face evaluation streams only when adaptation is triggered selectively. Confidence-gated test-time learning can improve robustness while avoiding the drift and overfitting that often appear when every test example updates the model.
+
+## Related Work
+
+Recent work on test-time training, entropy minimization, sample-specific optimization, and lightweight adapter tuning suggests that adaptation at inference time can help under distribution shift, but the gains are unstable for large language and vision-language models. LoRA-style updates are practical for open models, yet always-on adaptation often harms calibration or accumulates errors. This proposal differs by studying the same confidence-gated adaptation rule across both text and multimodal Hugging Face tasks under a fixed compute budget, with direct comparisons against no adaptation, always-on LoRA adaptation, and reset-based baselines. The focus is not just whether test-time learning can help, but when the gate should fire, how often adaptation should be reverted, and whether the gains survive realistic stream ordering.
+
+## Abstract
+
+Open large language models and vision-language models are increasingly deployed on evaluation streams that differ from the data distribution seen during instruction tuning. Test-time learning is a promising response, but for modern open models it remains unclear whether lightweight online adaptation improves performance or simply introduces instability. We propose a practical study of confidence-gated test-time LoRA adaptation for open models running on Hugging Face benchmarks. The core idea is simple: the model remains frozen on easy or high-confidence examples, but small low-rank updates are activated on uncertain or shifted windows identified by entropy, answer-margin, or perplexity signals. We will compare this selective strategy against no adaptation, always-on LoRA updates, and periodic reset baselines for both text reasoning and multimodal reasoning tasks. Candidate text tasks include `allenai/ai2_arc`, `qiaojin/PubMedQA`, and subject-grouped subsets of `cais/mmlu`, while multimodal tasks include `lmms-lab/ScienceQA` and `HuggingFaceM4/ChartQA`. Candidate models include practical open families such as Qwen and Qwen2-VL in the 7B range with quantization when needed. The study emphasizes accuracy under stream shift, adaptation frequency, compute overhead, calibration changes, and failure cases. The expected outcome is a clear picture of whether selective test-time LoRA is a reliable tool or only a niche win under tightly defined conditions.
+
+## Experiments
+
+- Implement a unified evaluation harness with frozen-base inference plus three test-time learning baselines: no adaptation, always-on LoRA adaptation, and confidence-gated LoRA adaptation with optional periodic reset.
+- Use an open LLM such as Qwen2.5-7B-Instruct for text tasks and an open VLM such as Qwen2-VL-7B-Instruct for multimodal tasks, using 4-bit or 8-bit loading when needed to stay within a single 96GB GPU server.
+- Evaluate on Hugging Face datasets including `allenai/ai2_arc`, `qiaojin/PubMedQA`, and a filtered subject stream from `cais/mmlu` for text, plus `lmms-lab/ScienceQA` and `HuggingFaceM4/ChartQA` for multimodal reasoning.
+- Create multiple evaluation streams with IID ordering, clustered domain ordering, and hard-example bursts to test whether gating helps more under localized shift than under random order.
+- Measure exact-match or accuracy, calibration proxies, adaptation trigger rate, extra wall-clock time per sample, and performance before and after reset events.
+- Analyze whether improvements concentrate in a small number of difficult windows or produce broad gains, and document cases where adaptation hurts final accuracy.
+
+## Risk Factors And Limitations
+
+- Multimodal evaluation pipelines may require substantial engineering before meaningful adaptation experiments can begin.
+- The adaptation signal may be too noisy on multiple-choice tasks, leading to drift even with gating.
+- Quantization, caching, and generation settings may interact with LoRA updates and complicate fair comparisons.
+- The compute overhead of repeated adapter updates may erase practical benefits even when small accuracy gains exist.
+- A negative result is possible if confidence signals are not predictive of when adaptation is useful.
+
