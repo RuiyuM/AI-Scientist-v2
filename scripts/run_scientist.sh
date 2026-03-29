@@ -13,11 +13,28 @@ IDEA_IDX="${3:-0}"
 RUN_LABEL="$(basename "${IDEAS_JSON%.json}")-idea${IDEA_IDX}"
 ENABLE_GPU_WATCHDOG="${ENABLE_GPU_WATCHDOG:-1}"
 AUTO_PUSH_REPORTS="${AUTO_PUSH_REPORTS:-1}"
+RUNTIME_DIR="${REPO_ROOT}/.runtime"
+EXIT_CODE_FILE="${RUNTIME_DIR}/${RUN_LABEL}.exit_code"
+EXIT_META_FILE="${RUNTIME_DIR}/${RUN_LABEL}.exit_meta.json"
 
 cd "${REPO_ROOT}"
+mkdir -p "${RUNTIME_DIR}"
+rm -f "${EXIT_CODE_FILE}" "${EXIT_META_FILE}"
 
 cleanup() {
   local exit_code=$?
+
+  printf '%s\n' "${exit_code}" > "${EXIT_CODE_FILE}"
+  cat > "${EXIT_META_FILE}" <<EOF
+{
+  "timestamp_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "run_label": "${RUN_LABEL}",
+  "idea_idx": ${IDEA_IDX},
+  "ideas_json": "${IDEAS_JSON}",
+  "config_path": "${CONFIG_PATH}",
+  "exit_code": ${exit_code}
+}
+EOF
 
   if [[ "${ENABLE_GPU_WATCHDOG}" != "0" ]]; then
     bash "${SCRIPT_DIR}/stop_gpu_watchdog.sh" "${REPO_ROOT}" >/dev/null 2>&1 || true

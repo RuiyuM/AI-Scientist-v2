@@ -9,6 +9,7 @@ IDEA_IDXS="${4:-0,1,2}"
 
 INTERVAL_SEC="${SERIAL_RUN_WATCHDOG_INTERVAL_SEC:-60}"
 PERIODIC_PUSH_SEC="${SERIAL_RUN_WATCHDOG_PERIODIC_PUSH_SEC:-600}"
+MAX_RESTARTS="${SERIAL_RUN_MAX_RESTARTS:-3}"
 
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/load_api_env.sh"
@@ -93,8 +94,12 @@ else:
         "idea_idxs": idea_idxs,
         "started": active[:1],
         "completed": [],
+        "restart_counts": {},
         "active_idx": active[0] if active else None,
     }
+
+if "restart_counts" not in state:
+    state["restart_counts"] = {}
 
 with open(state_file, "w") as handle:
     json.dump(state, handle, indent=2)
@@ -114,6 +119,7 @@ import sys
 from datetime import datetime, timezone
 
 repo_root, ideas_json, config_path, state_file, status_file = sys.argv[1:6]
+max_restarts = int(os.getenv("SERIAL_RUN_MAX_RESTARTS", "3"))
 
 with open(state_file, "r") as handle:
     state = json.load(handle)
@@ -152,6 +158,7 @@ if os.path.isdir(exp_root):
     ]
 
 runs = []
+latest_dir_by_idx = {}
 for idx in idea_idxs:
     idea_name = ideas[idx]["Name"]
     exp_dirs = sorted(
@@ -162,6 +169,8 @@ for idx in idea_idxs:
             or f"_{idea_name}_attempt_" in os.path.basename(path)
         ]
     )
+    latest_dir = exp_dirs[-1] if exp_dirs else None
+    latest_dir_by_idx[idx] = latest_dir
     runs.append(
         {
             "idea_idx": idx,
@@ -169,8 +178,9 @@ for idx in idea_idxs:
             "running": idx in active_processes,
             "queued": idx not in state["started"],
             "completed": idx in state["completed"],
+            "restart_count": state["restart_counts"].get(str(idx), 0),
             "processes": active_processes.get(idx, []),
-            "latest_experiment_dir": exp_dirs[-1] if exp_dirs else None,
+            "latest_experiment_dir": latest_dir,
         }
     )
 
@@ -178,10 +188,62 @@ transition = {"action": "noop"}
 active_idx = state.get("active_idx")
 
 if active_idx is not None and active_idx not in active_processes:
-    if active_idx not in state["completed"]:
-        state["completed"].append(active_idx)
-    state["active_idx"] = None
-    transition = {"action": "completed", "idea_idx": active_idx}
+    run_label = f"{os.path.basename(ideas_json[:-5])}-idea{active_idx}"
+    runtime_dir = os.path.join(repo_root, ".runtime")
+    exit_code_file = os.path.join(runtime_dir, f"{run_label}.exit_code")
+    latest_dir = latest_dir_by_idx.get(active_idx)
+    completion_artifact = False
+    if latest_dir:
+        token_tracker = os.path.join(latest_dir, "token_tracker.json")
+        completion_artifact = os.path.exists(token_tracker) or any(
+            name.endswith(".pdf") for name in os.listdir(latest_dir)
+        )
+
+    completed = False
+    exit_reason = "missing_exit_file"
+    exit_code = None
+    if os.path.exists(exit_code_file):
+        try:
+            with open(exit_code_file, "r") as handle:
+                exit_code = int(handle.read().strip())
+        except ValueError:
+            exit_code = None
+
+    if exit_code == 0:
+        completed = True
+        exit_reason = "clean_exit"
+    elif exit_code is not None:
+        exit_reason = f"nonzero_exit_{exit_code}"
+    elif completion_artifact:
+        completed = True
+        exit_reason = "artifact_completion"
+
+    if completed:
+        if active_idx not in state["completed"]:
+            state["completed"].append(active_idx)
+        state["active_idx"] = None
+        transition = {
+            "action": "completed",
+            "idea_idx": active_idx,
+            "reason": exit_reason,
+        }
+    else:
+        restart_count = state["restart_counts"].get(str(active_idx), 0)
+        if restart_count < max_restarts:
+            state["restart_counts"][str(active_idx)] = restart_count + 1
+            transition = {
+                "action": "restart",
+                "idea_idx": active_idx,
+                "reason": exit_reason,
+                "attempt": restart_count + 1,
+            }
+        else:
+            transition = {
+                "action": "stalled",
+                "idea_idx": active_idx,
+                "reason": exit_reason,
+                "attempt": restart_count,
+            }
 
 if state.get("active_idx") is None:
     next_idx = None
@@ -203,6 +265,7 @@ payload = {
     "active_idx": state.get("active_idx"),
     "started": state["started"],
     "completed": state["completed"],
+    "restart_counts": state["restart_counts"],
     "queue_complete": len(state["completed"]) == len(idea_idxs),
     "runs": runs,
 }
@@ -233,9 +296,24 @@ print("" if value is None else value)
 PY
 )"
 
+  reason="$(python3 - "${transition}" <<'PY'
+import json
+import sys
+print(json.loads(sys.argv[1]).get("reason", ""))
+PY
+)"
+
+  attempt="$(python3 - "${transition}" <<'PY'
+import json
+import sys
+value = json.loads(sys.argv[1]).get("attempt")
+print("" if value is None else value)
+PY
+)"
+
   case "${action}" in
     completed)
-      printf '%s [serial-run] idea %s completed, snapshotting\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${idea_idx}" | tee -a "${LOG_FILE}" >> "${ALERT_FILE}"
+      printf '%s [serial-run] idea %s completed (%s), snapshotting\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${idea_idx}" "${reason}" | tee -a "${LOG_FILE}" >> "${ALERT_FILE}"
       bash "${SCRIPT_DIR}/snapshot_experiment_reports.sh" \
         "${REPO_ROOT}/experiments" \
         "${REPO_ROOT}/research_reports" >> "${LOG_FILE}" 2>&1 || true
@@ -249,6 +327,22 @@ PY
         "${IDEAS_JSON}" \
         "${CONFIG_PATH}" \
         "${idea_idx}" >> "${LOG_FILE}" 2>&1
+      ;;
+    restart)
+      printf '%s [serial-run] restarting idea %s attempt %s (%s)\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${idea_idx}" "${attempt}" "${reason}" | tee -a "${LOG_FILE}" >> "${ALERT_FILE}"
+      bash "${SCRIPT_DIR}/snapshot_experiment_reports.sh" \
+        "${REPO_ROOT}/experiments" \
+        "${REPO_ROOT}/research_reports" >> "${LOG_FILE}" 2>&1 || true
+      bash "${SCRIPT_DIR}/push_workspace_state.sh" \
+        "${REPO_ROOT}" \
+        "serial-run-restart-idea${idea_idx}" >> "${LOG_FILE}" 2>&1 || true
+      bash "${SCRIPT_DIR}/start_multi_direction_scientists.sh" \
+        "${IDEAS_JSON}" \
+        "${CONFIG_PATH}" \
+        "${idea_idx}" >> "${LOG_FILE}" 2>&1
+      ;;
+    stalled)
+      printf '%s [serial-run] idea %s stalled after %s restart attempts (%s)\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${idea_idx}" "${attempt}" "${reason}" | tee -a "${LOG_FILE}" >> "${ALERT_FILE}"
       ;;
     *)
       printf '%s [serial-run] heartbeat\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${LOG_FILE}"
