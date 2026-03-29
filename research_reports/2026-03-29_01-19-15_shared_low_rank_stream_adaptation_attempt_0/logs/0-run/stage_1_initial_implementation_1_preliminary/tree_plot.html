@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Check if we're running under Live Server
+      if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+          let lastModified = '';
+
+          // Check for file changes every second
+          setInterval(async () => {
+              try {
+                  const response = await fetch(window.location.href, { method: 'HEAD' });
+                  // get a timestamp that shows when the file was last changed
+                  const currentModified = response.headers.get('last-modified');
+
+                  if (lastModified && lastModified !== currentModified) {
+                      window.location.reload();
+                  }
+
+                  lastModified = currentModified;
+              } catch (e) {
+                  console.error('Error checking for updates:', e);
+              }
+          }, 1000);
+      }
+  </script>
+    <script
+      id="p5scripttag"
+      src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"
+      integrity="sha512-uaz5GpnQoE6t5echKlX8P52czvsIGgLPcvlzfvRubLZ1Hp8JemUDnbUiAahbVtPb+jUVrNETuXvAhDDF/N3M4w=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+
+    <script>
+      const bgCol = "#FFFFFF";
+const accentCol = "#1a439e";
+
+hljs.initHighlightingOnLoad();
+
+// Function to update background color globally
+function updateBackgroundColor(color) {
+  // Update the JS variable
+  window.bgColCurrent = color;
+
+  // Update body background
+  document.body.style.backgroundColor = color;
+
+  // Update canvas container background
+  const canvasContainer = document.getElementById('canvas-container');
+  if (canvasContainer) {
+    canvasContainer.style.backgroundColor = color;
+  }
+}
+
+// Store tree data for each stage
+const stageData = {
+  Stage_1: null,
+  Stage_2: null,
+  Stage_3: null,
+  Stage_4: null
+};
+
+// Keep track of current selected stage
+let currentStage = null;
+let currentSketch = null;
+let availableStages = [];
+
+// Class definitions for nodes and edges
+class Node {
+  constructor(x, y, id, isRoot = false) {
+    this.x = x;
+    this.y = y;
+    this.id = id;
+    this.visible = isRoot; // Only root nodes are visible initially
+    this.appearProgress = 0;
+    this.popEffect = 0;
+    this.selected = false;
+    this.isRootNode = isRoot;
+  }
+
+  update() {
+    if (this.visible) {
+      // Handle the main appearance animation
+      if (this.appearProgress < 1) {
+        this.appearProgress += 0.06;
+
+        // When we reach full size, trigger the pop effect
+        if (this.appearProgress >= 1) {
+          this.appearProgress = 1; // Cap at 1
+          this.popEffect = 1; // Start the pop effect
+        }
+      }
+
+      // Handle the pop effect animation
+      if (this.popEffect > 0) {
+        this.popEffect -= 0.15; // Control how quickly it shrinks back
+        if (this.popEffect < 0) this.popEffect = 0; // Don't go negative
+      }
+    }
+  }
+
+  startAnimation() {
+    this.visible = true;
+  }
+
+  color() {
+    if (this.selected) {
+      return accentCol; // Use the global accent color variable for selected node
+    }
+    return '#4263eb'; // Default blue color
+  }
+
+  render(p5) {
+    if (this.visible) {
+      const popBonus = this.popEffect * 0.1;
+      const nodeScale = p5.map(this.appearProgress, 0, 1, 0, 1) + popBonus;
+      const alpha = p5.map(this.appearProgress, 0, 1, 0, 255);
+
+      p5.push();
+      p5.translate(this.x, this.y);
+
+      // Shadow effect
+      p5.noStroke();
+      p5.rectMode(p5.CENTER);
+
+      for (let i = 1; i <= 4; i++) {
+        p5.fill(0, 0, 0, alpha * 0.06);
+        p5.rect(i, i, 30 * nodeScale, 30 * nodeScale, 10);
+      }
+
+      // Main square - use node's color with alpha
+      let nodeColor = p5.color(this.color());
+      nodeColor.setAlpha(alpha);
+      p5.fill(nodeColor);
+      p5.rect(0, 0, 30 * nodeScale, 30 * nodeScale, 10);
+
+      // Draw checkmark icon if the node is selected
+      if (this.selected && this.appearProgress >= 1) {
+        p5.stroke(255);
+        p5.strokeWeight(2 * nodeScale);
+        p5.noFill();
+        // Draw checkmark
+        p5.beginShape();
+        p5.vertex(-8, 0);
+        p5.vertex(-3, 5);
+        p5.vertex(8, -6);
+        p5.endShape();
+      }
+
+      p5.pop();
+    }
+  }
+
+  isMouseOver(p5) {
+    return this.visible &&
+           p5.mouseX > this.x - 15 &&
+           p5.mouseX < this.x + 15 &&
+           p5.mouseY > this.y - 15 &&
+           p5.mouseY < this.y + 15;
+  }
+
+  // Connect this node to a child node
+  child(childNode) {
+    // Create an edge from this node to the child
+    let isLeft = childNode.x < this.x;
+    let isRight = childNode.x > this.x;
+    let edge = new Edge(this, childNode, isLeft, isRight);
+    return edge;
+  }
+}
+
+class Edge {
+  constructor(parent, child, isLeft, isRight) {
+    this.parent = parent;
+    this.child = child;
+    this.isLeft = isLeft;
+    this.isRight = isRight;
+    this.progress = 0;
+
+    // Calculate the midpoint where branching occurs
+    this.midY = parent.y + (child.y - parent.y) * 0.6;
+
+    // Use the actual child x-coordinate
+    // This ensures the edge will connect directly to the child node
+    this.branchX = child.x;
+  }
+
+  update() {
+    if (this.parent.visible && this.progress < 1) {
+      this.progress += 0.01; // Adjust animation speed
+    }
+    if (this.progress >= 1) {
+      this.child.visible = true;
+    }
+  }
+
+  color() {
+    return this.child.color();
+  }
+
+  render(p5) {
+    if (!this.parent.visible) return;
+
+    // Calculate path lengths
+    const verticalDist1 = this.midY - this.parent.y;
+    const horizontalDist = Math.abs(this.branchX - this.parent.x);
+    const verticalDist2 = this.child.y - this.midY;
+    const totalLength = verticalDist1 + horizontalDist + verticalDist2;
+
+    // Calculate how much of each segment to draw
+    const currentLength = totalLength * this.progress;
+
+    p5.stroke(180, 190, 205);
+    p5.strokeWeight(1.5);
+    p5.noFill();
+
+    // Always draw the first vertical segment from parent
+    if (currentLength > 0) {
+      const firstSegmentLength = Math.min(currentLength, verticalDist1);
+      const currentMidY = p5.lerp(this.parent.y, this.midY, firstSegmentLength / verticalDist1);
+      p5.line(this.parent.x, this.parent.y, this.parent.x, currentMidY);
+    }
+
+    if (currentLength > verticalDist1) {
+      // Draw second segment (horizontal)
+      const secondSegmentLength = Math.min(currentLength - verticalDist1, horizontalDist);
+      const currentBranchX = p5.lerp(this.parent.x, this.branchX, secondSegmentLength / horizontalDist);
+      p5.line(this.parent.x, this.midY, currentBranchX, this.midY);
+
+      if (currentLength > verticalDist1 + horizontalDist) {
+        // Draw third segment (vertical to child)
+        const thirdSegmentLength = currentLength - verticalDist1 - horizontalDist;
+        const currentChildY = p5.lerp(this.midY, this.child.y, thirdSegmentLength / verticalDist2);
+        p5.line(this.branchX, this.midY, this.branchX, currentChildY);
+      }
+    }
+  }
+}
+
+// Create a modified sketch for each stage
+function createTreeSketch(stageId) {
+  return function(p5) {
+    let nodes = [];
+    let edges = [];
+    let treeData = stageData[stageId];
+
+    p5.setup = function() {
+      const canvas = p5.createCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+      canvas.parent('canvas-container');
+      p5.smooth();
+      p5.frameRate(60);
+
+      if (treeData) {
+        createTreeFromData(treeData);
+      }
+    };
+
+    p5.windowResized = function() {
+      p5.resizeCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+    };
+
+    function createTreeFromData(data) {
+      // Clear existing nodes and edges
+      nodes = [];
+      edges = [];
+
+      // Add defensive checks to prevent errors
+      if (!data || !data.layout || !Array.isArray(data.layout) || !data.edges || !Array.isArray(data.edges)) {
+        console.error("Invalid tree data format:", data);
+        return; // Exit if data structure is invalid
+      }
+
+      // Find all parent nodes in edges
+      const parentNodes = new Set();
+      for (const [parentId, childId] of data.edges) {
+        parentNodes.add(parentId);
+      }
+
+      // Create nodes
+      for (let i = 0; i < data.layout.length; i++) {
+        const [nx, ny] = data.layout[i];
+        // A node is a root if it's a parent and not a child in any edge
+        const isRoot = parentNodes.has(i) && data.edges.every(edge => edge[1] !== i);
+
+        const node = new Node(
+          nx * p5.width * 0.8 + p5.width * 0.1,
+          ny * p5.height * 0.8 + p5.height * 0.1,
+          i,
+          isRoot
+        );
+        nodes.push(node);
+      }
+
+      // If no root was found, make the first parent node visible
+      if (!nodes.some(node => node.visible) && parentNodes.size > 0) {
+        // Get the first parent node
+        const firstParentId = [...parentNodes][0];
+        if (nodes[firstParentId]) {
+          nodes[firstParentId].visible = true;
+        }
+      }
+
+      // Create edges
+      for (const [parentId, childId] of data.edges) {
+        const parent = nodes[parentId];
+        const child = nodes[childId];
+        if (parent && child) { // Verify both nodes exist
+          const isLeft = child.x < parent.x;
+          const isRight = child.x > parent.x;
+          edges.push(new Edge(parent, child, isLeft, isRight));
+        }
+      }
+
+      // Select the first node by default
+      if (nodes.length > 0) {
+        nodes[0].selected = true;
+        updateNodeInfo(0);
+      }
+    }
+
+    p5.draw = function() {
+      // Use the global background color if available, otherwise use the default bgCol
+      const currentBgColor = window.bgColCurrent || bgCol;
+      p5.background(currentBgColor);
+
+      // Update and render edges
+      for (const edge of edges) {
+        edge.update();
+        edge.render(p5);
+      }
+
+      // Update and render nodes
+      for (const node of nodes) {
+        node.update();
+        node.render(p5);
+      }
+
+      // Handle mouse hover
+      p5.cursor(p5.ARROW);
+      for (const node of nodes) {
+        if (node.isMouseOver(p5)) {
+          p5.cursor(p5.HAND);
+        }
+      }
+    };
+
+    p5.mousePressed = function() {
+      // Check if any node was clicked
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].visible && nodes[i].isMouseOver(p5)) {
+          // Deselect all nodes
+          nodes.forEach(n => n.selected = false);
+          // Select the clicked node
+          nodes[i].selected = true;
+          // Update the right panel with node info
+          updateNodeInfo(i);
+          break;
+        }
+      }
+    };
+
+    function updateNodeInfo(nodeIndex) {
+      if (treeData) {
+        setNodeInfo(
+          treeData.code[nodeIndex],
+          treeData.plan[nodeIndex],
+          treeData.plot_code?.[nodeIndex],
+          treeData.plot_plan?.[nodeIndex],
+          treeData.metrics?.[nodeIndex],
+          treeData.exc_type?.[nodeIndex] || '',
+          treeData.exc_info?.[nodeIndex]?.args?.[0] || '',
+          treeData.exc_stack?.[nodeIndex] || [],
+          treeData.plots?.[nodeIndex] || [],
+          treeData.plot_analyses?.[nodeIndex] || [],
+          treeData.vlm_feedback_summary?.[nodeIndex] || '',
+          treeData.datasets_successfully_tested?.[nodeIndex] || [],
+          treeData.exec_time_feedback?.[nodeIndex] || '',
+          treeData.exec_time?.[nodeIndex] || ''
+        );
+      }
+    }
+  };
+}
+
+// Start a new p5 sketch for the given stage
+function startSketch(stageId) {
+  if (currentSketch) {
+    currentSketch.remove();
+  }
+
+  if (stageData[stageId]) {
+    currentSketch = new p5(createTreeSketch(stageId));
+
+    // Update stage info
+    const stageNumber = stageId.split('_')[1];
+    let stageDesc = '';
+    switch(stageId) {
+      case 'Stage_1': stageDesc = 'Preliminary Investigation'; break;
+      case 'Stage_2': stageDesc = 'Baseline Tuning'; break;
+      case 'Stage_3': stageDesc = 'Research Agenda Execution'; break;
+      case 'Stage_4': stageDesc = 'Ablation Studies'; break;
+    }
+
+    document.getElementById('stage-info').innerHTML =
+      `<strong>Current Stage: ${stageNumber} - ${stageDesc}</strong>`;
+  }
+}
+
+// Handle tab selection
+function selectStage(stageId) {
+  if (!stageData[stageId] || !availableStages.includes(stageId)) {
+    return; // Don't allow selection of unavailable stages
+  }
+
+  // Update active tab styles
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  document.querySelector(`.tab[data-stage="${stageId}"]`).classList.add('active');
+
+  // Start the new sketch
+  currentStage = stageId;
+  startSketch(stageId);
+}
+
+// Function to load the tree data for all stages
+async function loadAllStageData(baseTreeData) {
+  console.log("Loading stage data with base data:", baseTreeData);
+
+  // The base tree data is for the current stage
+  const currentStageId = baseTreeData.current_stage || 'Stage_1';
+
+  // Ensure base tree data is valid and has required properties
+  if (baseTreeData && baseTreeData.layout && baseTreeData.edges) {
+    stageData[currentStageId] = baseTreeData;
+    availableStages.push(currentStageId);
+    console.log(`Added current stage ${currentStageId} to available stages`);
+  } else {
+    console.warn(`Current stage ${currentStageId} data is invalid:`, baseTreeData);
+  }
+
+  // Use relative path to load other stage trees
+  const logDirPath = baseTreeData.log_dir_path || '.';
+  console.log("Log directory path:", logDirPath);
+
+  // Load data for each stage if available
+  const stageNames = ['Stage_1', 'Stage_2', 'Stage_3', 'Stage_4'];
+  const stageNames2actualNames = {
+    'Stage_1': 'stage_1_initial_implementation_1_preliminary',
+    'Stage_2': 'stage_2_baseline_tuning_1_first_attempt',
+    'Stage_3': 'stage_3_creative_research_1_first_attempt',
+    'Stage_4': 'stage_4_ablation_studies_1_first_attempt'
+    }
+
+  for (const stage of stageNames) {
+
+    if (baseTreeData.completed_stages && baseTreeData.completed_stages.includes(stage)) {
+      try {
+        console.log(`Attempting to load data for ${stage} from ${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+        const response = await fetch(`${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+
+        if (response.ok) {
+          const data = await response.json();
+
+          // Validate the loaded data
+          if (data && data.layout && data.edges) {
+            stageData[stage] = data;
+            availableStages.push(stage);
+            console.log(`Successfully loaded and validated data for ${stage}`);
+          } else {
+            console.warn(`Loaded data for ${stage} is invalid:`, data);
+          }
+        } else {
+          console.warn(`Failed to load data for ${stage} - HTTP status ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`Error loading data for ${stage}:`, error);
+      }
+    } else {
+      console.log(`Skipping stage ${stage} - not in completed stages list:`, baseTreeData.completed_stages);
+    }
+  }
+
+  // Update tab visibility based on available stages
+  updateTabVisibility();
+
+  // Start with the first available stage
+  if (availableStages.length > 0) {
+    selectStage(availableStages[0]);
+  } else {
+    console.warn("No stages available to display");
+    // Display a message in the canvas area
+    document.getElementById('canvas-container').innerHTML =
+      '<div style="padding: 20px; color: #333; text-align: center;"><h3>No valid tree data available to display</h3></div>';
+  }
+}
+
+// Update tab visibility based on available stages
+function updateTabVisibility() {
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(tab => {
+    const stageId = tab.getAttribute('data-stage');
+    if (availableStages.includes(stageId)) {
+      tab.classList.remove('disabled');
+    } else {
+      tab.classList.add('disabled');
+    }
+  });
+}
+
+// Utility function to set the node info in the right panel
+const setNodeInfo = (code, plan, plot_code, plot_plan, metrics = null, exc_type = '', exc_info = '',
+    exc_stack = [], plots = [], plot_analyses = [], vlm_feedback_summary = '',
+    datasets_successfully_tested = [], exec_time_feedback = '', exec_time = '') => {
+  const codeElm = document.getElementById("code");
+  if (codeElm) {
+    if (code) {
+      codeElm.innerHTML = hljs.highlight(code, { language: "python" }).value;
+    } else {
+      codeElm.innerHTML = '<p>No code available</p>';
+    }
+  }
+
+  const planElm = document.getElementById("plan");
+  if (planElm) {
+    if (plan) {
+      planElm.innerHTML = hljs.highlight(plan, { language: "plaintext" }).value;
+    } else {
+      planElm.innerHTML = '<p>No plan available</p>';
+    }
+  }
+
+  const plot_codeElm = document.getElementById("plot_code");
+  if (plot_codeElm) {
+    if (plot_code) {
+      plot_codeElm.innerHTML = hljs.highlight(plot_code, { language: "python" }).value;
+    } else {
+      plot_codeElm.innerHTML = '<p>No plot code available</p>';
+    }
+  }
+
+  const plot_planElm = document.getElementById("plot_plan");
+  if (plot_planElm) {
+    if (plot_plan) {
+      plot_planElm.innerHTML = hljs.highlight(plot_plan, { language: "plaintext" }).value;
+    } else {
+      plot_planElm.innerHTML = '<p>No plot plan available</p>';
+    }
+  }
+
+  const metricsElm = document.getElementById("metrics");
+  if (metricsElm) {
+      let metricsContent = `<h3>Metrics:</h3>`;
+      if (metrics && metrics.metric_names) {
+          for (const metric of metrics.metric_names) {
+              metricsContent += `<div class="metric-group">`;
+              metricsContent += `<h4>${metric.metric_name}</h4>`;
+              metricsContent += `<p><strong>Description:</strong> ${metric.description || 'N/A'}</p>`;
+              metricsContent += `<p><strong>Optimization:</strong> ${metric.lower_is_better ? 'Minimize' : 'Maximize'}</p>`;
+
+              // Create table for dataset values
+              metricsContent += `<table class="metric-table">
+                  <tr>
+                      <th>Dataset</th>
+                      <th>Final Value</th>
+                      <th>Best Value</th>
+                  </tr>`;
+
+              for (const dataPoint of metric.data) {
+                  metricsContent += `<tr>
+                      <td>${dataPoint.dataset_name}</td>
+                      <td>${dataPoint.final_value?.toFixed(4) || 'N/A'}</td>
+                      <td>${dataPoint.best_value?.toFixed(4) || 'N/A'}</td>
+                  </tr>`;
+              }
+
+              metricsContent += `</table></div>`;
+          }
+      } else if (metrics === null) {
+          metricsContent += `<p>No metrics available</p>`;
+      }
+      metricsElm.innerHTML = metricsContent;
+  }
+
+  // Add plots display
+  const plotsElm = document.getElementById("plots");
+  if (plotsElm) {
+      if (plots && plots.length > 0) {
+          let plotsContent = '';
+          plots.forEach(plotPath => {
+              plotsContent += `
+                  <div class="plot-item">
+                      <img src="${plotPath}" alt="Experiment Plot" onerror="console.error('Failed to load plot:', this.src)"/>
+                  </div>`;
+          });
+          plotsElm.innerHTML = plotsContent;
+      } else {
+          plotsElm.innerHTML = '';
+      }
+  }
+
+  // Add error info display
+  const errorElm = document.getElementById("exc_info");
+  if (errorElm) {
+    if (exc_type) {
+      let errorContent = `<h3 style="color: #ff5555">Exception Information:</h3>
+                          <p><strong>Type:</strong> ${exc_type}</p>`;
+
+      if (exc_info) {
+        errorContent += `<p><strong>Details:</strong> <pre>${JSON.stringify(exc_info, null, 2)}</pre></p>`;
+      }
+
+      if (exc_stack) {
+        errorContent += `<p><strong>Stack Trace:</strong> <pre>${exc_stack.join('\n')}</pre></p>`;
+      }
+
+      errorElm.innerHTML = errorContent;
+    } else {
+      errorElm.innerHTML = "No exception info available";
+    }
+  }
+
+  const exec_timeElm = document.getElementById("exec_time");
+  if (exec_timeElm) {
+    let exec_timeContent = '<div id="exec_time"><h3>Execution Time (in seconds):</h3><p>' + exec_time + '</p></div>';
+    exec_timeElm.innerHTML = exec_timeContent;
+  }
+
+  const exec_time_feedbackElm = document.getElementById("exec_time_feedback");
+  if (exec_time_feedbackElm) {
+    let exec_time_feedbackContent = '<div id="exec_time_feedback_content">'
+    exec_time_feedbackContent += '<h3>Execution Time Feedback:</h3>'
+    exec_time_feedbackContent += '<p>' + exec_time_feedback + '</p>'
+    exec_time_feedbackContent += '</div>';
+    exec_time_feedbackElm.innerHTML = exec_time_feedbackContent;
+  }
+
+  const vlm_feedbackElm = document.getElementById("vlm_feedback");
+  if (vlm_feedbackElm) {
+      let vlm_feedbackContent = '';
+
+      if (plot_analyses && plot_analyses.length > 0) {
+          vlm_feedbackContent += `<h3>Plot Analysis:</h3>`;
+          plot_analyses.forEach(analysis => {
+              if (analysis && analysis.plot_path) {  // Add null check
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <h4>Analysis for ${analysis.plot_path.split('/').pop()}</h4>
+                          <p>${analysis.analysis || 'No analysis available'}</p>
+                          <ul class="key-findings">
+                              ${(analysis.key_findings || []).map(finding => `<li>${finding}</li>`).join('')}
+                          </ul>
+                      </div>`;
+              } else {
+                  console.warn('Received invalid plot analysis:', analysis);
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <p>Invalid plot analysis data received</p>
+                      </div>`;
+              }
+          });
+      }
+
+      // Add actionable insights if available
+      if (vlm_feedback_summary && typeof vlm_feedback_summary === 'string') {
+          vlm_feedbackContent += `
+              <div class="vlm_feedback">
+                  <h3>VLM Feedback Summary:</h3>
+                  <p>${vlm_feedback_summary}</p>
+              </div>`;
+      }
+
+      console.log("Datasets successfully tested:", datasets_successfully_tested);
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          vlm_feedbackContent += `
+              <div id="datasets_successfully_tested">
+                  <h3>Datasets Successfully Tested:</h3>
+                  <p>${datasets_successfully_tested.join(', ')}</p>
+              </div>`;
+      }
+
+      if (!vlm_feedbackContent) {
+          vlm_feedbackContent = '<p>No insights available for this experiment.</p>';
+      }
+
+      vlm_feedbackElm.innerHTML = vlm_feedbackContent;
+  }
+
+  const datasets_successfully_testedElm = document.getElementById("datasets_successfully_tested");
+  if (datasets_successfully_testedElm) {
+      let datasets_successfully_testedContent = '';
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          datasets_successfully_testedContent = `<h3>Datasets Successfully Tested:</h3><ul>`;
+          datasets_successfully_tested.forEach(dataset => {
+              datasets_successfully_testedContent += `<li>${dataset}</li>`;
+          });
+          datasets_successfully_testedContent += `</ul>`;
+      } else {
+          datasets_successfully_testedContent = '<p>No datasets tested yet</p>';
+      }
+      datasets_successfully_testedElm.innerHTML = datasets_successfully_testedContent;
+  }
+};
+
+// Initialize with the provided tree data
+const treeStructData = {"edges": [[0, 1]], "layout": [[0.5, 0.0], [0.5, 1.0]], "plan": ["I will implement a lightweight continual test-time learning baseline on a\nsynthetic sequence of three related classification tasks that mimic gradual task\ndrift without requiring heavy Hugging Face downloads. A frozen MLP backbone will\nact as the base model, and adaptation will happen only through a shared low-rank\nlinear adapter added to the hidden representation. We will compare three stream\nstrategies: reset-after-batch, naive carry-forward, and anchored carry-forward\nwith L2 regularization toward the initial adapter plus simple outlier rejection\nbased on batch loss. The base model will be pretrained on a source mixture, then\nfrozen before online evaluation on a chronological stream built by concatenating\ntask-specific batches. For each stream batch, the model first predicts to\nmeasure true online accuracy, then performs one unsupervised-style proxy update\nusing entropy minimization on that same batch, giving a simple working test-time\nadaptation loop. I will track validation loss during base pretraining, and\nduring streaming I will record per-step accuracies, losses, adapter drift, and\nfinal Stream-Averaged Online Accuracy for each method. The code will also save\nall metrics as numpy files and produce a plot of online accuracy across stream\nposition so we can visually inspect transfer versus forgetting. This gives a\ncompact but functional first baseline that can later be swapped to real Hugging\nFace task streams and larger transformers.", "Seed node"], "code": ["import os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport copy\nimport math\nimport random\nimport numpy as np\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nimport matplotlib.pyplot as plt\nfrom torch.utils.data import TensorDataset, DataLoader\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(42)\nnp.random.seed(42)\nrandom.seed(42)\n\nexperiment_data = {\n    \"synthetic_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"losses\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"stream_position\": [],\n        \"methods\": {},\n    }\n}\n\n\n# -----------------------------\n# Synthetic related-task data\n# -----------------------------\ndef make_task_data(n, d, shift_scale=0.0, rotate=False):\n    x = np.random.randn(n, d).astype(np.float32)\n    if rotate:\n        theta = shift_scale\n        R = np.eye(d, dtype=np.float32)\n        c, s = np.cos(theta), np.sin(theta)\n        for i in range(0, min(d - 1, 6), 2):\n            R[i : i + 2, i : i + 2] = np.array([[c, -s], [s, c]], dtype=np.float32)\n        x = x @ R.T\n    x[:, :4] += shift_scale\n    score = (\n        1.2 * x[:, 0]\n        - 0.9 * x[:, 1]\n        + 0.7 * x[:, 2] * x[:, 3]\n        + 0.5 * np.sin(x[:, 4])\n        - 0.3 * x[:, 5] ** 2\n    )\n    y = (score > 0.2 * shift_scale).astype(np.int64)\n    return x, y\n\n\nd_in = 16\nn_train, n_val, n_test = 2000, 600, 900\n\n# Source train/val mixture\nx0_tr, y0_tr = make_task_data(n_train // 2, d_in, 0.0, False)\nx1_tr, y1_tr = make_task_data(n_train // 4, d_in, 0.6, True)\nx2_tr, y2_tr = make_task_data(n_train // 4, d_in, 1.0, True)\nx_train = np.concatenate([x0_tr, x1_tr, x2_tr], 0)\ny_train = np.concatenate([y0_tr, y1_tr, y2_tr], 0)\n\nx0_val, y0_val = make_task_data(n_val // 3, d_in, 0.0, False)\nx1_val, y1_val = make_task_data(n_val // 3, d_in, 0.6, True)\nx2_val, y2_val = make_task_data(n_val - 2 * (n_val // 3), d_in, 1.0, True)\nx_val = np.concatenate([x0_val, x1_val, x2_val], 0)\ny_val = np.concatenate([y0_val, y1_val, y2_val], 0)\n\n# Stream tasks\ntask_specs = [(\"task_a\", 0.0, False), (\"task_b\", 0.7, True), (\"task_c\", 1.3, True)]\nstream_batches = []\nbatch_size_stream = 32\nfor name, shift, rot in task_specs:\n    x_t, y_t = make_task_data(n_test // 3, d_in, shift, rot)\n    for i in range(0, len(x_t), batch_size_stream):\n        xb = torch.tensor(x_t[i : i + batch_size_stream], dtype=torch.float32)\n        yb = torch.tensor(y_t[i : i + batch_size_stream], dtype=torch.long)\n        stream_batches.append((name, xb, yb))\n\ntrain_loader = DataLoader(\n    TensorDataset(torch.tensor(x_train), torch.tensor(y_train)),\n    batch_size=64,\n    shuffle=True,\n)\nval_loader = DataLoader(\n    TensorDataset(torch.tensor(x_val), torch.tensor(y_val)),\n    batch_size=128,\n    shuffle=False,\n)\n\n\n# -----------------------------\n# Model: frozen backbone + low-rank adapter\n# -----------------------------\nclass Backbone(nn.Module):\n    def __init__(self, d_in=16, d_hidden=32, n_classes=2):\n        super().__init__()\n        self.fc1 = nn.Linear(d_in, d_hidden)\n        self.fc2 = nn.Linear(d_hidden, n_classes)\n\n    def hidden(self, x):\n        return torch.tanh(self.fc1(x))\n\n    def logits_from_hidden(self, h):\n        return self.fc2(h)\n\n    def forward(self, x):\n        h = self.hidden(x)\n        return self.logits_from_hidden(h)\n\n\nclass LowRankAdapter(nn.Module):\n    def __init__(self, d_hidden=32, rank=4, scale=0.1):\n        super().__init__()\n        self.A = nn.Parameter(scale * torch.randn(d_hidden, rank))\n        self.B = nn.Parameter(scale * torch.randn(rank, d_hidden))\n\n    def forward(self, h):\n        return h + h @ self.A @ self.B\n\n\nclass AdaptedModel(nn.Module):\n    def __init__(self, backbone, adapter):\n        super().__init__()\n        self.backbone = backbone\n        self.adapter = adapter\n\n    def forward(self, x):\n        h = self.backbone.hidden(x)\n        h = self.adapter(h)\n        return self.backbone.logits_from_hidden(h)\n\n\nbackbone = Backbone(d_in=d_in).to(device)\nopt = torch.optim.Adam(backbone.parameters(), lr=1e-3)\ncriterion = nn.CrossEntropyLoss()\n\n# -----------------------------\n# Base pretraining\n# -----------------------------\nepochs = 10\nfor epoch in range(1, epochs + 1):\n    backbone.train()\n    tr_loss, tr_correct, tr_total = 0.0, 0, 0\n    for xb, yb in train_loader:\n        batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n        opt.zero_grad()\n        logits = backbone(batch[\"x\"])\n        loss = criterion(logits, batch[\"y\"])\n        loss.backward()\n        opt.step()\n        tr_loss += loss.item() * batch[\"x\"].size(0)\n        tr_correct += (logits.argmax(1) == batch[\"y\"]).sum().item()\n        tr_total += batch[\"x\"].size(0)\n\n    backbone.eval()\n    val_loss, val_correct, val_total = 0.0, 0, 0\n    with torch.no_grad():\n        for xb, yb in val_loader:\n            batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n            logits = backbone(batch[\"x\"])\n            loss = criterion(logits, batch[\"y\"])\n            val_loss += loss.item() * batch[\"x\"].size(0)\n            val_correct += (logits.argmax(1) == batch[\"y\"]).sum().item()\n            val_total += batch[\"x\"].size(0)\n\n    tr_loss /= tr_total\n    val_loss /= val_total\n    tr_acc = tr_correct / tr_total\n    val_acc = val_correct / val_total\n    experiment_data[\"synthetic_stream\"][\"metrics\"][\"train\"].append((epoch, tr_acc))\n    experiment_data[\"synthetic_stream\"][\"metrics\"][\"val\"].append((epoch, val_acc))\n    experiment_data[\"synthetic_stream\"][\"losses\"][\"train\"].append((epoch, tr_loss))\n    experiment_data[\"synthetic_stream\"][\"losses\"][\"val\"].append((epoch, val_loss))\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n\nfor p in backbone.parameters():\n    p.requires_grad = False\nbackbone.eval()\n\n\n# -----------------------------\n# Streaming evaluation methods\n# -----------------------------\ndef entropy_loss(logits):\n    p = F.softmax(logits, dim=-1).clamp_min(1e-8)\n    return -(p * p.log()).sum(dim=-1).mean()\n\n\ndef clone_adapter(adapter):\n    new_adapter = LowRankAdapter(d_hidden=32, rank=4).to(device)\n    new_adapter.load_state_dict(copy.deepcopy(adapter.state_dict()))\n    return new_adapter\n\n\nbase_adapter = LowRankAdapter(d_hidden=32, rank=4).to(device)\nbase_state = copy.deepcopy(base_adapter.state_dict())\n\nmethods = [\"reset\", \"carry\", \"anchored\"]\nfor m in methods:\n    experiment_data[\"synthetic_stream\"][\"methods\"][m] = {\n        \"metrics\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"losses\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"stream_position\": [],\n        \"task_name\": [],\n        \"adapter_drift\": [],\n    }\n\n\ndef run_stream(method):\n    adapter = clone_adapter(base_adapter)\n    model = AdaptedModel(backbone, adapter).to(device)\n    init_params = [p.detach().clone() for p in model.adapter.parameters()]\n    optimizer = torch.optim.SGD(model.adapter.parameters(), lr=0.2)\n\n    online_accs, online_losses = [], []\n    for step, (task_name, xb, yb) in enumerate(stream_batches):\n        if method == \"reset\":\n            model.adapter.load_state_dict(copy.deepcopy(base_state))\n            optimizer = torch.optim.SGD(model.adapter.parameters(), lr=0.2)\n\n        batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n\n        # Online eval before adaptation\n        model.eval()\n        with torch.no_grad():\n            logits = model(batch[\"x\"])\n            loss_sup = criterion(logits, batch[\"y\"]).item()\n            preds = logits.argmax(1)\n            acc = (preds == batch[\"y\"]).float().mean().item()\n\n        online_accs.append(acc)\n        online_losses.append(loss_sup)\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"metrics\"][\n            \"stream\"\n        ].append((step, acc))\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"losses\"][\n            \"stream\"\n        ].append((step, loss_sup))\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"predictions\"].append(\n            preds.detach().cpu().numpy()\n        )\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"ground_truth\"].append(\n            batch[\"y\"].detach().cpu().numpy()\n        )\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\n            \"stream_position\"\n        ].append(step)\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"task_name\"].append(\n            task_name\n        )\n\n        # Test-time update via entropy minimization\n        model.train()\n        optimizer.zero_grad()\n        logits_adapt = model(batch[\"x\"])\n        ent = entropy_loss(logits_adapt)\n\n        if method == \"anchored\":\n            reg = 0.0\n            for p, p0 in zip(model.adapter.parameters(), init_params):\n                reg = reg + ((p - p0) ** 2).mean()\n            total_loss = ent + 0.05 * reg\n            # outlier rejection based on high supervised-like uncertainty proxy\n            if loss_sup < 1.2:\n                total_loss.backward()\n                optimizer.step()\n        else:\n            total_loss = ent\n            total_loss.backward()\n            optimizer.step()\n\n        drift = 0.0\n        with torch.no_grad():\n            for p, p0 in zip(model.adapter.parameters(), init_params):\n                drift += ((p - p0) ** 2).mean().item()\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"adapter_drift\"].append(\n            drift\n        )\n\n    return float(np.mean(online_accs)), np.array(online_accs), np.array(online_losses)\n\n\nresults = {}\nfor method in methods:\n    mean_acc, acc_curve, loss_curve = run_stream(method)\n    results[method] = {\n        \"mean_acc\": mean_acc,\n        \"acc_curve\": acc_curve,\n        \"loss_curve\": loss_curve,\n    }\n    print(f\"{method} Stream-Averaged Online Accuracy: {mean_acc:.4f}\")\n\n# -----------------------------\n# Save arrays and plot\n# -----------------------------\nfor method in methods:\n    np.save(\n        os.path.join(working_dir, f\"{method}_acc_curve.npy\"),\n        results[method][\"acc_curve\"],\n    )\n    np.save(\n        os.path.join(working_dir, f\"{method}_loss_curve.npy\"),\n        results[method][\"loss_curve\"],\n    )\n    np.save(\n        os.path.join(working_dir, f\"{method}_drift.npy\"),\n        np.array(\n            experiment_data[\"synthetic_stream\"][\"methods\"][method][\"adapter_drift\"]\n        ),\n    )\n    preds = np.concatenate(\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"predictions\"]\n    )\n    gts = np.concatenate(\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"ground_truth\"]\n    )\n    np.save(os.path.join(working_dir, f\"{method}_predictions.npy\"), preds)\n    np.save(os.path.join(working_dir, f\"{method}_ground_truth.npy\"), gts)\n\npositions = np.arange(len(stream_batches))\nplt.figure(figsize=(8, 4))\nfor method in methods:\n    plt.plot(\n        positions,\n        results[method][\"acc_curve\"],\n        label=f\"{method} ({results[method]['mean_acc']:.3f})\",\n    )\nplt.xlabel(\"Stream position\")\nplt.ylabel(\"Online accuracy\")\nplt.title(\"Synthetic continual test-time adaptation\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(os.path.join(working_dir, \"synthetic_stream_online_accuracy.png\"), dpi=150)\nplt.close()\n\nexperiment_data[\"synthetic_stream\"][\"stream_position\"] = positions.tolist()\nexperiment_data[\"synthetic_stream\"][\"metrics\"][\"stream\"] = [\n    (m, results[m][\"mean_acc\"]) for m in methods\n]\nexperiment_data[\"synthetic_stream\"][\"losses\"][\"stream\"] = [\n    (m, float(results[m][\"loss_curve\"].mean())) for m in methods\n]\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\n\nprint(\"Final summary:\")\nfor method in methods:\n    print(\n        f\"{method}: Stream-Averaged Online Accuracy = {results[method]['mean_acc']:.4f}\"\n    )\n", "# Set random seed\nimport random\nimport numpy as np\nimport torch\n\nseed = 0\nrandom.seed(seed)\nnp.random.seed(seed)\ntorch.manual_seed(seed)\nif torch.cuda.is_available():\n    torch.cuda.manual_seed(seed)\n\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport copy\nimport math\nimport random\nimport numpy as np\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nimport matplotlib.pyplot as plt\nfrom torch.utils.data import TensorDataset, DataLoader\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(42)\nnp.random.seed(42)\nrandom.seed(42)\n\nexperiment_data = {\n    \"synthetic_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"losses\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"stream_position\": [],\n        \"methods\": {},\n    }\n}\n\n\n# -----------------------------\n# Synthetic related-task data\n# -----------------------------\ndef make_task_data(n, d, shift_scale=0.0, rotate=False):\n    x = np.random.randn(n, d).astype(np.float32)\n    if rotate:\n        theta = shift_scale\n        R = np.eye(d, dtype=np.float32)\n        c, s = np.cos(theta), np.sin(theta)\n        for i in range(0, min(d - 1, 6), 2):\n            R[i : i + 2, i : i + 2] = np.array([[c, -s], [s, c]], dtype=np.float32)\n        x = x @ R.T\n    x[:, :4] += shift_scale\n    score = (\n        1.2 * x[:, 0]\n        - 0.9 * x[:, 1]\n        + 0.7 * x[:, 2] * x[:, 3]\n        + 0.5 * np.sin(x[:, 4])\n        - 0.3 * x[:, 5] ** 2\n    )\n    y = (score > 0.2 * shift_scale).astype(np.int64)\n    return x, y\n\n\nd_in = 16\nn_train, n_val, n_test = 2000, 600, 900\n\n# Source train/val mixture\nx0_tr, y0_tr = make_task_data(n_train // 2, d_in, 0.0, False)\nx1_tr, y1_tr = make_task_data(n_train // 4, d_in, 0.6, True)\nx2_tr, y2_tr = make_task_data(n_train // 4, d_in, 1.0, True)\nx_train = np.concatenate([x0_tr, x1_tr, x2_tr], 0)\ny_train = np.concatenate([y0_tr, y1_tr, y2_tr], 0)\n\nx0_val, y0_val = make_task_data(n_val // 3, d_in, 0.0, False)\nx1_val, y1_val = make_task_data(n_val // 3, d_in, 0.6, True)\nx2_val, y2_val = make_task_data(n_val - 2 * (n_val // 3), d_in, 1.0, True)\nx_val = np.concatenate([x0_val, x1_val, x2_val], 0)\ny_val = np.concatenate([y0_val, y1_val, y2_val], 0)\n\n# Stream tasks\ntask_specs = [(\"task_a\", 0.0, False), (\"task_b\", 0.7, True), (\"task_c\", 1.3, True)]\nstream_batches = []\nbatch_size_stream = 32\nfor name, shift, rot in task_specs:\n    x_t, y_t = make_task_data(n_test // 3, d_in, shift, rot)\n    for i in range(0, len(x_t), batch_size_stream):\n        xb = torch.tensor(x_t[i : i + batch_size_stream], dtype=torch.float32)\n        yb = torch.tensor(y_t[i : i + batch_size_stream], dtype=torch.long)\n        stream_batches.append((name, xb, yb))\n\ntrain_loader = DataLoader(\n    TensorDataset(torch.tensor(x_train), torch.tensor(y_train)),\n    batch_size=64,\n    shuffle=True,\n)\nval_loader = DataLoader(\n    TensorDataset(torch.tensor(x_val), torch.tensor(y_val)),\n    batch_size=128,\n    shuffle=False,\n)\n\n\n# -----------------------------\n# Model: frozen backbone + low-rank adapter\n# -----------------------------\nclass Backbone(nn.Module):\n    def __init__(self, d_in=16, d_hidden=32, n_classes=2):\n        super().__init__()\n        self.fc1 = nn.Linear(d_in, d_hidden)\n        self.fc2 = nn.Linear(d_hidden, n_classes)\n\n    def hidden(self, x):\n        return torch.tanh(self.fc1(x))\n\n    def logits_from_hidden(self, h):\n        return self.fc2(h)\n\n    def forward(self, x):\n        h = self.hidden(x)\n        return self.logits_from_hidden(h)\n\n\nclass LowRankAdapter(nn.Module):\n    def __init__(self, d_hidden=32, rank=4, scale=0.1):\n        super().__init__()\n        self.A = nn.Parameter(scale * torch.randn(d_hidden, rank))\n        self.B = nn.Parameter(scale * torch.randn(rank, d_hidden))\n\n    def forward(self, h):\n        return h + h @ self.A @ self.B\n\n\nclass AdaptedModel(nn.Module):\n    def __init__(self, backbone, adapter):\n        super().__init__()\n        self.backbone = backbone\n        self.adapter = adapter\n\n    def forward(self, x):\n        h = self.backbone.hidden(x)\n        h = self.adapter(h)\n        return self.backbone.logits_from_hidden(h)\n\n\nbackbone = Backbone(d_in=d_in).to(device)\nopt = torch.optim.Adam(backbone.parameters(), lr=1e-3)\ncriterion = nn.CrossEntropyLoss()\n\n# -----------------------------\n# Base pretraining\n# -----------------------------\nepochs = 10\nfor epoch in range(1, epochs + 1):\n    backbone.train()\n    tr_loss, tr_correct, tr_total = 0.0, 0, 0\n    for xb, yb in train_loader:\n        batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n        opt.zero_grad()\n        logits = backbone(batch[\"x\"])\n        loss = criterion(logits, batch[\"y\"])\n        loss.backward()\n        opt.step()\n        tr_loss += loss.item() * batch[\"x\"].size(0)\n        tr_correct += (logits.argmax(1) == batch[\"y\"]).sum().item()\n        tr_total += batch[\"x\"].size(0)\n\n    backbone.eval()\n    val_loss, val_correct, val_total = 0.0, 0, 0\n    with torch.no_grad():\n        for xb, yb in val_loader:\n            batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n            logits = backbone(batch[\"x\"])\n            loss = criterion(logits, batch[\"y\"])\n            val_loss += loss.item() * batch[\"x\"].size(0)\n            val_correct += (logits.argmax(1) == batch[\"y\"]).sum().item()\n            val_total += batch[\"x\"].size(0)\n\n    tr_loss /= tr_total\n    val_loss /= val_total\n    tr_acc = tr_correct / tr_total\n    val_acc = val_correct / val_total\n    experiment_data[\"synthetic_stream\"][\"metrics\"][\"train\"].append((epoch, tr_acc))\n    experiment_data[\"synthetic_stream\"][\"metrics\"][\"val\"].append((epoch, val_acc))\n    experiment_data[\"synthetic_stream\"][\"losses\"][\"train\"].append((epoch, tr_loss))\n    experiment_data[\"synthetic_stream\"][\"losses\"][\"val\"].append((epoch, val_loss))\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n\nfor p in backbone.parameters():\n    p.requires_grad = False\nbackbone.eval()\n\n\n# -----------------------------\n# Streaming evaluation methods\n# -----------------------------\ndef entropy_loss(logits):\n    p = F.softmax(logits, dim=-1).clamp_min(1e-8)\n    return -(p * p.log()).sum(dim=-1).mean()\n\n\ndef clone_adapter(adapter):\n    new_adapter = LowRankAdapter(d_hidden=32, rank=4).to(device)\n    new_adapter.load_state_dict(copy.deepcopy(adapter.state_dict()))\n    return new_adapter\n\n\nbase_adapter = LowRankAdapter(d_hidden=32, rank=4).to(device)\nbase_state = copy.deepcopy(base_adapter.state_dict())\n\nmethods = [\"reset\", \"carry\", \"anchored\"]\nfor m in methods:\n    experiment_data[\"synthetic_stream\"][\"methods\"][m] = {\n        \"metrics\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"losses\": {\"train\": [], \"val\": [], \"stream\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"stream_position\": [],\n        \"task_name\": [],\n        \"adapter_drift\": [],\n    }\n\n\ndef run_stream(method):\n    adapter = clone_adapter(base_adapter)\n    model = AdaptedModel(backbone, adapter).to(device)\n    init_params = [p.detach().clone() for p in model.adapter.parameters()]\n    optimizer = torch.optim.SGD(model.adapter.parameters(), lr=0.2)\n\n    online_accs, online_losses = [], []\n    for step, (task_name, xb, yb) in enumerate(stream_batches):\n        if method == \"reset\":\n            model.adapter.load_state_dict(copy.deepcopy(base_state))\n            optimizer = torch.optim.SGD(model.adapter.parameters(), lr=0.2)\n\n        batch = {\"x\": xb.to(device), \"y\": yb.to(device)}\n\n        # Online eval before adaptation\n        model.eval()\n        with torch.no_grad():\n            logits = model(batch[\"x\"])\n            loss_sup = criterion(logits, batch[\"y\"]).item()\n            preds = logits.argmax(1)\n            acc = (preds == batch[\"y\"]).float().mean().item()\n\n        online_accs.append(acc)\n        online_losses.append(loss_sup)\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"metrics\"][\n            \"stream\"\n        ].append((step, acc))\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"losses\"][\n            \"stream\"\n        ].append((step, loss_sup))\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"predictions\"].append(\n            preds.detach().cpu().numpy()\n        )\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"ground_truth\"].append(\n            batch[\"y\"].detach().cpu().numpy()\n        )\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\n            \"stream_position\"\n        ].append(step)\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"task_name\"].append(\n            task_name\n        )\n\n        # Test-time update via entropy minimization\n        model.train()\n        optimizer.zero_grad()\n        logits_adapt = model(batch[\"x\"])\n        ent = entropy_loss(logits_adapt)\n\n        if method == \"anchored\":\n            reg = 0.0\n            for p, p0 in zip(model.adapter.parameters(), init_params):\n                reg = reg + ((p - p0) ** 2).mean()\n            total_loss = ent + 0.05 * reg\n            # outlier rejection based on high supervised-like uncertainty proxy\n            if loss_sup < 1.2:\n                total_loss.backward()\n                optimizer.step()\n        else:\n            total_loss = ent\n            total_loss.backward()\n            optimizer.step()\n\n        drift = 0.0\n        with torch.no_grad():\n            for p, p0 in zip(model.adapter.parameters(), init_params):\n                drift += ((p - p0) ** 2).mean().item()\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"adapter_drift\"].append(\n            drift\n        )\n\n    return float(np.mean(online_accs)), np.array(online_accs), np.array(online_losses)\n\n\nresults = {}\nfor method in methods:\n    mean_acc, acc_curve, loss_curve = run_stream(method)\n    results[method] = {\n        \"mean_acc\": mean_acc,\n        \"acc_curve\": acc_curve,\n        \"loss_curve\": loss_curve,\n    }\n    print(f\"{method} Stream-Averaged Online Accuracy: {mean_acc:.4f}\")\n\n# -----------------------------\n# Save arrays and plot\n# -----------------------------\nfor method in methods:\n    np.save(\n        os.path.join(working_dir, f\"{method}_acc_curve.npy\"),\n        results[method][\"acc_curve\"],\n    )\n    np.save(\n        os.path.join(working_dir, f\"{method}_loss_curve.npy\"),\n        results[method][\"loss_curve\"],\n    )\n    np.save(\n        os.path.join(working_dir, f\"{method}_drift.npy\"),\n        np.array(\n            experiment_data[\"synthetic_stream\"][\"methods\"][method][\"adapter_drift\"]\n        ),\n    )\n    preds = np.concatenate(\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"predictions\"]\n    )\n    gts = np.concatenate(\n        experiment_data[\"synthetic_stream\"][\"methods\"][method][\"ground_truth\"]\n    )\n    np.save(os.path.join(working_dir, f\"{method}_predictions.npy\"), preds)\n    np.save(os.path.join(working_dir, f\"{method}_ground_truth.npy\"), gts)\n\npositions = np.arange(len(stream_batches))\nplt.figure(figsize=(8, 4))\nfor method in methods:\n    plt.plot(\n        positions,\n        results[method][\"acc_curve\"],\n        label=f\"{method} ({results[method]['mean_acc']:.3f})\",\n    )\nplt.xlabel(\"Stream position\")\nplt.ylabel(\"Online accuracy\")\nplt.title(\"Synthetic continual test-time adaptation\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(os.path.join(working_dir, \"synthetic_stream_online_accuracy.png\"), dpi=150)\nplt.close()\n\nexperiment_data[\"synthetic_stream\"][\"stream_position\"] = positions.tolist()\nexperiment_data[\"synthetic_stream\"][\"metrics\"][\"stream\"] = [\n    (m, results[m][\"mean_acc\"]) for m in methods\n]\nexperiment_data[\"synthetic_stream\"][\"losses\"][\"stream\"] = [\n    (m, float(results[m][\"loss_curve\"].mean())) for m in methods\n]\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\n\nprint(\"Final summary:\")\nfor method in methods:\n    print(\n        f\"{method}: Stream-Averaged Online Accuracy = {results[method]['mean_acc']:.4f}\"\n    )\n"], "term_out": ["['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 0.6771', '\\n', 'Epoch\n2: validation_loss = 0.5891', '\\n', 'Epoch 3: validation_loss = 0.5099', '\\n',\n'Epoch 4: validation_loss = 0.4399', '\\n', 'Epoch 5: validation_loss = 0.3901',\n'\\n', 'Epoch 6: validation_loss = 0.3579', '\\n', 'Epoch 7: validation_loss =\n0.3380', '\\n', 'Epoch 8: validation_loss = 0.3271', '\\n', 'Epoch 9:\nvalidation_loss = 0.3185', '\\n', 'Epoch 10: validation_loss = 0.3148', '\\n',\n'reset Stream-Averaged Online Accuracy: 0.8569', '\\n', 'carry Stream-Averaged\nOnline Accuracy: 0.8608', '\\n', 'anchored Stream-Averaged Online Accuracy:\n0.8608', '\\n', 'Final summary:', '\\n', 'reset: Stream-Averaged Online Accuracy =\n0.8569', '\\n', 'carry: Stream-Averaged Online Accuracy = 0.8608', '\\n',\n'anchored: Stream-Averaged Online Accuracy = 0.8608', '\\n', 'Execution time: a\nsecond seconds (time limit is 2 hours).']", "['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 0.6771', '\\n', 'Epoch\n2: validation_loss = 0.5891', '\\n', 'Epoch 3: validation_loss = 0.5099', '\\n',\n'Epoch 4: validation_loss = 0.4399', '\\n', 'Epoch 5: validation_loss = 0.3901',\n'\\n', 'Epoch 6: validation_loss = 0.3579', '\\n', 'Epoch 7: validation_loss =\n0.3380', '\\n', 'Epoch 8: validation_loss = 0.3271', '\\n', 'Epoch 9:\nvalidation_loss = 0.3185', '\\n', 'Epoch 10: validation_loss = 0.3148', '\\n',\n'reset Stream-Averaged Online Accuracy: 0.8569', '\\n', 'carry Stream-Averaged\nOnline Accuracy: 0.8608', '\\n', 'anchored Stream-Averaged Online Accuracy:\n0.8608', '\\n', 'Final summary:', '\\n', 'reset: Stream-Averaged Online Accuracy =\n0.8569', '\\n', 'carry: Stream-Averaged Online Accuracy = 0.8608', '\\n',\n'anchored: Stream-Averaged Online Accuracy = 0.8608', '\\n', 'Execution time: a\nsecond seconds (time limit is 2 hours).']"], "analysis": ["", ""], "exc_type": [null, null], "exc_info": [null, null], "exc_stack": [null, null], "exp_name": "0-run", "metrics": [{"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Model accuracy on the training set.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.86, "best_value": 0.8615}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Model accuracy on the validation set.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.871667, "best_value": 0.876667}]}, {"metric_name": "train loss", "lower_is_better": true, "description": "Model loss on the training set.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.332915, "best_value": 0.332915}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Model loss on the validation set.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.314816, "best_value": 0.314816}]}, {"metric_name": "stream mean accuracy (reset)", "lower_is_better": false, "description": "Mean accuracy over the stream using reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.856944, "best_value": 0.856944}]}, {"metric_name": "stream mean accuracy (carry)", "lower_is_better": false, "description": "Mean accuracy over the stream using carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.860764, "best_value": 0.860764}]}, {"metric_name": "stream mean accuracy (anchored)", "lower_is_better": false, "description": "Mean accuracy over the stream using anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.860764, "best_value": 0.860764}]}, {"metric_name": "stream mean loss (reset)", "lower_is_better": true, "description": "Mean loss over the stream using reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.346378, "best_value": 0.346378}]}, {"metric_name": "stream mean loss (carry)", "lower_is_better": true, "description": "Mean loss over the stream using carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.344645, "best_value": 0.344645}]}, {"metric_name": "stream mean loss (anchored)", "lower_is_better": true, "description": "Mean loss over the stream using anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.344635, "best_value": 0.344635}]}, {"metric_name": "online stream accuracy (reset)", "lower_is_better": false, "description": "Online stream accuracy for the reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.833333, "best_value": 0.9375}]}, {"metric_name": "online stream loss (reset)", "lower_is_better": true, "description": "Online stream loss for the reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.34562, "best_value": 0.219262}]}, {"metric_name": "adapter drift (reset)", "lower_is_better": true, "description": "Adapter drift for the reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 3e-06, "best_value": 2e-06}]}, {"metric_name": "online stream accuracy (carry)", "lower_is_better": false, "description": "Online stream accuracy for the carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.916667, "best_value": 0.9375}]}, {"metric_name": "online stream loss (carry)", "lower_is_better": true, "description": "Online stream loss for the carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.313877, "best_value": 0.213726}]}, {"metric_name": "adapter drift (carry)", "lower_is_better": true, "description": "Adapter drift for the carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.004565, "best_value": 4e-06}]}, {"metric_name": "online stream accuracy (anchored)", "lower_is_better": false, "description": "Online stream accuracy for the anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.916667, "best_value": 0.9375}]}, {"metric_name": "online stream loss (anchored)", "lower_is_better": true, "description": "Online stream loss for the anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.313927, "best_value": 0.21373}]}, {"metric_name": "adapter drift (anchored)", "lower_is_better": true, "description": "Adapter drift for the anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.004545, "best_value": 4e-06}]}]}, {"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Model accuracy on the training set.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.86, "best_value": 0.8615}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Model accuracy on the validation set.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.871667, "best_value": 0.876667}]}, {"metric_name": "train loss", "lower_is_better": true, "description": "Loss on the training set.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.332915, "best_value": 0.332915}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Loss on the validation set.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.314816, "best_value": 0.314816}]}, {"metric_name": "stream mean accuracy (reset)", "lower_is_better": false, "description": "Mean accuracy over the stream using reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.856944, "best_value": 0.856944}]}, {"metric_name": "stream mean accuracy (carry)", "lower_is_better": false, "description": "Mean accuracy over the stream using carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.860764, "best_value": 0.860764}]}, {"metric_name": "stream mean accuracy (anchored)", "lower_is_better": false, "description": "Mean accuracy over the stream using anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.860764, "best_value": 0.860764}]}, {"metric_name": "stream mean loss (reset)", "lower_is_better": true, "description": "Mean loss over the stream using reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.346378, "best_value": 0.346378}]}, {"metric_name": "stream mean loss (carry)", "lower_is_better": true, "description": "Mean loss over the stream using carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.344645, "best_value": 0.344645}]}, {"metric_name": "stream mean loss (anchored)", "lower_is_better": true, "description": "Mean loss over the stream using anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.344635, "best_value": 0.344635}]}, {"metric_name": "online stream accuracy (reset)", "lower_is_better": false, "description": "Online stream accuracy for the reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.833333, "best_value": 0.9375}]}, {"metric_name": "online stream loss (reset)", "lower_is_better": true, "description": "Online stream loss for the reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.34562, "best_value": 0.219262}]}, {"metric_name": "adapter drift (reset)", "lower_is_better": true, "description": "Adapter drift for the reset method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 3e-06, "best_value": 2e-06}]}, {"metric_name": "online stream accuracy (carry)", "lower_is_better": false, "description": "Online stream accuracy for the carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.916667, "best_value": 0.9375}]}, {"metric_name": "online stream loss (carry)", "lower_is_better": true, "description": "Online stream loss for the carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.313877, "best_value": 0.213726}]}, {"metric_name": "adapter drift (carry)", "lower_is_better": true, "description": "Adapter drift for the carry method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.004565, "best_value": 4e-06}]}, {"metric_name": "online stream accuracy (anchored)", "lower_is_better": false, "description": "Online stream accuracy for the anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.916667, "best_value": 0.9375}]}, {"metric_name": "online stream loss (anchored)", "lower_is_better": true, "description": "Online stream loss for the anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.313927, "best_value": 0.21373}]}, {"metric_name": "adapter drift (anchored)", "lower_is_better": true, "description": "Adapter drift for the anchored method.", "data": [{"dataset_name": "synthetic_stream", "final_value": 0.004545, "best_value": 4e-06}]}]}], "is_best_node": [true, false], "plots": [["../../logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_online_accuracy.png", "../../logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_pretraining_accuracy_curves.png", "../../logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_pretraining_loss_curves.png", "../../logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_method_stream_accuracy_bar.png", "../../logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_online_accuracy_over_stream.png", "../../logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_online_loss_over_stream.png", "../../logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_adapter_drift_over_stream.png", "../../logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_method_stream_loss_bar.png"], ["../../logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_online_accuracy.png", "../../logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_pretraining_accuracy_curves.png", "../../logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_pretraining_loss_curves.png", "../../logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_method_stream_accuracy_bar.png", "../../logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_online_accuracy_over_stream.png", "../../logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_online_loss_over_stream.png", "../../logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_adapter_drift_over_stream.png", "../../logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_method_stream_loss_bar.png"]], "plot_paths": [["experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_online_accuracy.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_pretraining_accuracy_curves.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_pretraining_loss_curves.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_method_stream_accuracy_bar.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_online_accuracy_over_stream.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_online_loss_over_stream.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_adapter_drift_over_stream.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_method_stream_loss_bar.png"], ["experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_online_accuracy.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_pretraining_accuracy_curves.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_pretraining_loss_curves.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_method_stream_accuracy_bar.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_online_accuracy_over_stream.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_online_loss_over_stream.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_adapter_drift_over_stream.png", "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_method_stream_loss_bar.png"]], "plot_analyses": [[{"analysis": "The synthetic continual test-time adaptation accuracy plot shows that all methods track each other closely across the stream, with mean online accuracy reported as about 0.857 for reset and 0.861 for both carry and anchored. The small gap indicates only a marginal benefit from retaining adaptation over resetting. Most positions show overlapping trajectories, and the main deviations are localized dips and recoveries rather than sustained separation. This supports basic functional correctness of the continual adaptation pipeline, but it does not yet provide strong evidence that shared low-rank memory materially improves performance. For a paper-quality claim, you would want larger and more consistent gains, especially near task transitions or after gradual drift.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_online_accuracy.png"}, {"analysis": "The pretraining accuracy curves are smooth and well-behaved. Training accuracy rises from roughly 0.45 to around 0.86, while validation accuracy rises from about 0.60 to around 0.87 and then plateaus. Validation staying slightly above training throughout is unusual but not inherently wrong; it can happen with stronger train-time noise, augmentation, dropout, label smoothing, or an easier validation split. The key takeaway is that the backbone plus adapter setup appears trainable and converges quickly without obvious instability. Since both curves flatten by around epochs 5 to 7, additional pretraining epochs likely offer limited benefit in this synthetic setup.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_pretraining_accuracy_curves.png"}, {"analysis": "The pretraining loss curves decrease monotonically for both train and validation, ending near 0.33 for train and 0.31 for validation. This is consistent with the accuracy plot and indicates optimization is stable. The absence of divergence or widening train-validation gap suggests no obvious overfitting in the synthetic pretraining stage. As with the accuracy plot, validation loss being slightly lower than training loss is acceptable if regularization is active during training only. These curves support that the initial model state used for streaming experiments is reasonable and not confounded by failed optimization.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_pretraining_loss_curves.png"}, {"analysis": "The stream-averaged online accuracy bar chart confirms that the three methods are nearly tied, with carry and anchored only slightly above reset. The effect size is very small, so the practical significance is currently limited. For the stated hypothesis, this means the preliminary result is directionally consistent with shared adaptation helping, but only weakly. Because the bars are so close, uncertainty estimates such as multiple random seeds, confidence intervals, or bootstrap intervals are essential before drawing any conclusion. At this stage, the main value of this plot is that the implementation produces sensible aggregate metrics.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_method_stream_accuracy_bar.png"}, {"analysis": "The online accuracy over stream with task boundaries marked by vertical lines is useful for checking whether adaptation helps specifically at segment transitions. The curves remain highly overlapping before and after the boundaries, with no strong evidence that carry or anchored consistently reduce transition-related drops. There are a few positions late in the stream where anchored appears slightly better than reset, but the pattern is not systematic. This suggests either the task shifts are too mild, the adapter capacity/update rule is not yet impactful, or the synthetic stream generation does not create enough temporal structure for continual memory to matter. This is an important insight because the core hypothesis depends on gradual shift and reusable structure across segments.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_online_accuracy_over_stream.png"}, {"analysis": "The online loss over stream also shows near-complete overlap among methods, matching the accuracy results. Loss spikes and dips occur at similar positions for all strategies, implying that the stream difficulty pattern dominates any adaptation effect. There are small local improvements for carry or anchored at some positions, but they are not persistent. This reinforces the interpretation that the current benchmark is not stressing the difference between reset and persistent adaptation strongly enough. For future experiments, sharper distribution shifts, longer streams, or explicit outlier batches would better test the anchored method\u2019s intended advantages.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_online_loss_over_stream.png"}, {"analysis": "The adapter drift plot is one of the most informative figures for the proposed method. Reset remains at zero drift as expected, while carry and anchored accumulate steadily increasing drift over the stream, reaching roughly 0.0045 by the end. Importantly, this nonzero memory is being formed, so the mechanism is active; however, the accumulated drift does not correspond to a clear downstream performance gain in the other plots. That mismatch suggests the current updates may be too small to matter, may be tracking noise rather than reusable task structure, or the synthetic tasks do not reward retained adaptation. This is a valuable negative result at the implementation stage because it separates \u2018memory exists\u2019 from \u2018memory helps.\u2019", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_adapter_drift_over_stream.png"}, {"analysis": "The stream-averaged online loss bar chart shows almost indistinguishable mean loss across reset, carry, and anchored, around 0.345. This agrees with the accuracy summary and indicates that any advantage from persistent adaptation is currently negligible at the aggregate level. Since both accuracy and loss tell the same story, the conclusion is unlikely to be an artifact of thresholding or class imbalance. The main implication is that the current experimental setup is suitable for debugging and sanity checks, but not yet sufficient to validate the central research claim. The next step should be designing streams where forgetting, transfer, and outlier robustness can be observed more clearly.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_828aae502fc44246b8e7cec8e8b942a0_proc_7863/synthetic_stream_method_stream_loss_bar.png"}], [{"analysis": "The online accuracy trajectory over stream position shows that all methods track each other closely, with reset slightly below the others at several positions. The legend reports mean online accuracies of about 0.857 for reset and 0.861 for both carry and anchored, so the continual-memory variants provide only a very small improvement. The curves are highly non-monotonic, with sharp drops and recoveries, indicating the stream contains abrupt difficulty changes or task switches. This suggests the implementation is behaving sensibly, but the current synthetic setup does not yet produce a strong separation between adaptation policies.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_online_accuracy.png"}, {"analysis": "The pretraining accuracy curves look healthy and largely converged. Training accuracy rises quickly from roughly 0.45 to the mid-0.85 range, while validation accuracy increases from about 0.60 to the high-0.86 range and remains slightly above training throughout. That pattern does not indicate obvious overfitting; if anything, it suggests either regularization, an easy validation split, or synthetic noise differences between train and validation. For the current stage, this is good evidence that the base model or adapter pretraining pipeline is functional before online adaptation is evaluated.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_pretraining_accuracy_curves.png"}, {"analysis": "The pretraining loss curves decrease smoothly for both training and validation, from around 0.73 to 0.33 for training and from around 0.68 to 0.32 for validation. The absence of instability or divergence supports that optimization is working correctly. Validation loss staying slightly below training loss mirrors the accuracy plot and again suggests no overfitting problem in this preliminary implementation. The flattening after about epochs 7 to 10 indicates the model is near convergence, so additional pretraining epochs alone are unlikely to dramatically change the online adaptation story.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_pretraining_loss_curves.png"}, {"analysis": "The bar chart of stream-averaged online accuracy confirms that the three methods are nearly tied. Carry and anchored are marginally above reset, but the difference is visually tiny. This means the main hypothesis is not yet strongly supported: retaining shared adaptation memory is not clearly harmful, but it is also not yet clearly beneficial. For a top-paper direction, this plot argues that stronger task sequencing, larger shifts, or more challenging streams will be needed to expose meaningful differences.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_method_stream_accuracy_bar.png"}, {"analysis": "The segmented online accuracy plot, with task boundaries marked, is useful for diagnosing transfer across stream segments. Performance remains broadly stable across boundaries, and there is no dramatic collapse after entering a new segment, which suggests either the tasks are too similar or the adaptation mechanism is too weak to create strong positive or negative transfer. Reset appears to underperform slightly at some later positions, while anchored and carry often overlap. Because anchored does not visibly separate from naive carry, the regularization and outlier-rejection components are not yet showing a distinct practical effect in this synthetic experiment.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_online_accuracy_over_stream.png"}, {"analysis": "The online loss over the stream also shows very small differences among methods. Loss spikes align with the same difficult positions where accuracy dips, which is internally consistent and suggests the metrics are trustworthy. Carry and anchored are occasionally slightly lower than reset, but the gap is minor and inconsistent. This reinforces the interpretation that the current experiment demonstrates functional continual adaptation code rather than compelling evidence for one strategy over another.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_online_loss_over_stream.png"}, {"analysis": "The adapter drift plot is one of the more informative diagnostics. Reset stays at essentially zero drift throughout, as expected if adaptation is discarded after each step, while carry and anchored accumulate drift gradually to about 0.0045 by the end of the stream. The near-perfect overlap between carry and anchored implies that the anchor regularization is either too weak to noticeably constrain updates, not implemented in a way that changes the measured drift, or operating in a regime where the stream never triggers meaningful divergence. This is important because the central research idea depends on controlled memory retention; right now, memory accumulates, but the anchor does not appear to create a distinct behavior.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_adapter_drift_over_stream.png"}, {"analysis": "The stream-averaged online loss bar chart shows all methods clustered around roughly 0.345, with carry and anchored only trivially lower than reset. This matches the accuracy summary and confirms that any benefit from shared adaptation is very small in the current setup. Taken together with the drift plot, the result is scientifically interesting in a negative-result sense: retaining a shared adapter can change internal state without yielding a substantial online performance gain. For the next iteration, the most important step is likely not more tuning on this exact synthetic stream, but designing streams with clearer gradual shift, stronger task identity transitions, and explicit outlier episodes so the anchored method has a chance to demonstrate its intended advantage.", "plot_path": "experiments/2026-03-29_01-19-15_shared_low_rank_stream_adaptation_attempt_0/logs/0-run/experiment_results/experiment_f93482c9f76e433d9ca6cbb0ad2f217b_proc_7863/synthetic_stream_method_stream_loss_bar.png"}]], "vlm_feedback_summary": ["The uploaded figures show a preliminary synthetic continual test-time adaptation\nexperiment with pretraining curves and multiple online evaluation summaries.\nOverall, pretraining appears stable and convergent. In the online stream, reset\nis slightly worse on mean accuracy than carry and anchored, while carry and\nanchored are effectively tied. Online loss is also nearly identical across\nmethods. Adapter drift accumulates for carry and anchored while reset stays at\nzero, but this drift does not translate into a clear accuracy gain in the shown\nsynthetic setup. The results suggest the implementation is functioning, but the\nbenchmark is currently too easy or too homogeneous to clearly separate continual\nadaptation strategies.", "The plots show a preliminary synthetic continual test-time adaptation\nexperiment. Pretraining appears stable and convergent, while online stream\nresults indicate only very small differences among reset, carry, and anchored\nstrategies. Carry and anchored slightly outperform reset in mean online\naccuracy, but the gain is marginal. Adapter drift accumulates for carry/anchored\nwhile reset stays near zero, suggesting memory is being retained but not yet\ntranslating into a clear advantage. Overall, the current implementation looks\nfunctional, but evidence for the shared low-rank memory hypothesis is weak in\nthis synthetic setup."], "exec_time": [1.1554927825927734, 1.3892741203308105], "exec_time_feedback": ["", ""], "datasets_successfully_tested": [["synthetic_stream"], ["synthetic_stream"]], "plot_code": ["import matplotlib.pyplot as plt\nimport numpy as np\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\ntry:\n    experiment_data = np.load(\n        os.path.join(working_dir, \"experiment_data.npy\"), allow_pickle=True\n    ).item()\nexcept Exception as e:\n    print(f\"Error loading experiment data: {e}\")\n    experiment_data = {}\n\nds_name = \"synthetic_stream\"\nds = experiment_data.get(ds_name, {})\nmethods = ds.get(\"methods\", {})\n\n\ndef pairs_to_xy(pairs):\n    if not pairs:\n        return np.array([]), np.array([])\n    x, y = zip(*pairs)\n    return np.array(x), np.array(y)\n\n\ntrain_mx, train_my = pairs_to_xy(ds.get(\"metrics\", {}).get(\"train\", []))\nval_mx, val_my = pairs_to_xy(ds.get(\"metrics\", {}).get(\"val\", []))\ntrain_lx, train_ly = pairs_to_xy(ds.get(\"losses\", {}).get(\"train\", []))\nval_lx, val_ly = pairs_to_xy(ds.get(\"losses\", {}).get(\"val\", []))\nstream_summary = ds.get(\"metrics\", {}).get(\"stream\", [])\nloss_summary = ds.get(\"losses\", {}).get(\"stream\", [])\n\nif len(val_my):\n    print(f\"Best validation accuracy: {val_my.max():.4f}\")\nif len(val_ly):\n    print(f\"Final validation loss: {val_ly[-1]:.4f}\")\nfor m in methods:\n    sx, sy = pairs_to_xy(methods[m].get(\"metrics\", {}).get(\"stream\", []))\n    lx, ly = pairs_to_xy(methods[m].get(\"losses\", {}).get(\"stream\", []))\n    if len(sy):\n        print(f\"{m} mean stream accuracy: {sy.mean():.4f}\")\n    if len(ly):\n        print(f\"{m} mean stream loss: {ly.mean():.4f}\")\n\ntask_boundaries = []\ntask_labels = []\ntry:\n    ref_method = next(iter(methods)) if methods else None\n    if ref_method:\n        names = methods[ref_method].get(\"task_name\", [])\n        prev = None\n        for i, n in enumerate(names):\n            if n != prev:\n                task_boundaries.append(i)\n                task_labels.append(n)\n                prev = n\nexcept Exception:\n    pass\n\ntry:\n    plt.figure(figsize=(7, 4))\n    if len(train_mx):\n        plt.plot(train_mx, train_my, marker=\"o\", label=\"Train\")\n    if len(val_mx):\n        plt.plot(val_mx, val_my, marker=\"o\", label=\"Validation\")\n    plt.xlabel(\"Epoch\")\n    plt.ylabel(\"Accuracy\")\n    plt.title(\n        \"Synthetic Stream Dataset - Pretraining Accuracy Curves\\nTrain vs Validation\"\n    )\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_pretraining_accuracy_curves.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot1: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(7, 4))\n    if len(train_lx):\n        plt.plot(train_lx, train_ly, marker=\"o\", label=\"Train\")\n    if len(val_lx):\n        plt.plot(val_lx, val_ly, marker=\"o\", label=\"Validation\")\n    plt.xlabel(\"Epoch\")\n    plt.ylabel(\"Loss\")\n    plt.title(\"Synthetic Stream Dataset - Pretraining Loss Curves\\nTrain vs Validation\")\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_pretraining_loss_curves.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot2: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(7, 4))\n    if stream_summary:\n        labels = [k for k, _ in stream_summary]\n        vals = [v for _, v in stream_summary]\n        plt.bar(labels, vals)\n    plt.xlabel(\"Method\")\n    plt.ylabel(\"Mean Online Accuracy\")\n    plt.title(\n        \"Synthetic Stream Dataset - Stream-Averaged Online Accuracy\\nMethod Comparison\"\n    )\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_method_stream_accuracy_bar.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot3: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(8, 4))\n    for m, md in methods.items():\n        x, y = pairs_to_xy(md.get(\"metrics\", {}).get(\"stream\", []))\n        if len(x):\n            plt.plot(x, y, label=m)\n    for b in task_boundaries[1:]:\n        plt.axvline(b, color=\"gray\", linestyle=\"--\", linewidth=0.8)\n    plt.xlabel(\"Stream Position\")\n    plt.ylabel(\"Online Accuracy\")\n    plt.title(\n        \"Synthetic Stream Dataset - Online Accuracy Over Stream\\nTask Segments Marked by Vertical Lines\"\n    )\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_online_accuracy_over_stream.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot4: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(8, 4))\n    for m, md in methods.items():\n        x, y = pairs_to_xy(md.get(\"losses\", {}).get(\"stream\", []))\n        if len(x):\n            plt.plot(x, y, label=m)\n    for b in task_boundaries[1:]:\n        plt.axvline(b, color=\"gray\", linestyle=\"--\", linewidth=0.8)\n    plt.xlabel(\"Stream Position\")\n    plt.ylabel(\"Online Supervised Loss\")\n    plt.title(\n        \"Synthetic Stream Dataset - Online Loss Over Stream\\nTask Segments Marked by Vertical Lines\"\n    )\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_online_loss_over_stream.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot5: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(8, 4))\n    for m, md in methods.items():\n        drift = np.array(md.get(\"adapter_drift\", []))\n        if drift.size:\n            plt.plot(np.arange(len(drift)), drift, label=m)\n    for b in task_boundaries[1:]:\n        plt.axvline(b, color=\"gray\", linestyle=\"--\", linewidth=0.8)\n    plt.xlabel(\"Stream Position\")\n    plt.ylabel(\"Adapter Drift\")\n    plt.title(\n        \"Synthetic Stream Dataset - Adapter Drift Over Stream\\nTask Segments Marked by Vertical Lines\"\n    )\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_adapter_drift_over_stream.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot6: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(7, 4))\n    if loss_summary:\n        labels = [k for k, _ in loss_summary]\n        vals = [v for _, v in loss_summary]\n        plt.bar(labels, vals)\n    plt.xlabel(\"Method\")\n    plt.ylabel(\"Mean Stream Loss\")\n    plt.title(\n        \"Synthetic Stream Dataset - Stream-Averaged Online Loss\\nMethod Comparison\"\n    )\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_method_stream_loss_bar.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot7: {e}\")\n    plt.close()\n", "import matplotlib.pyplot as plt\nimport numpy as np\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\ntry:\n    experiment_data = np.load(\n        os.path.join(working_dir, \"experiment_data.npy\"), allow_pickle=True\n    ).item()\nexcept Exception as e:\n    print(f\"Error loading experiment data: {e}\")\n    experiment_data = {}\n\nds_name = \"synthetic_stream\"\nds = experiment_data.get(ds_name, {})\nmethods = ds.get(\"methods\", {})\n\n\ndef pairs_to_xy(pairs):\n    if not pairs:\n        return np.array([]), np.array([])\n    x, y = zip(*pairs)\n    return np.array(x), np.array(y)\n\n\ntrain_mx, train_my = pairs_to_xy(ds.get(\"metrics\", {}).get(\"train\", []))\nval_mx, val_my = pairs_to_xy(ds.get(\"metrics\", {}).get(\"val\", []))\ntrain_lx, train_ly = pairs_to_xy(ds.get(\"losses\", {}).get(\"train\", []))\nval_lx, val_ly = pairs_to_xy(ds.get(\"losses\", {}).get(\"val\", []))\nstream_summary = ds.get(\"metrics\", {}).get(\"stream\", [])\nloss_summary = ds.get(\"losses\", {}).get(\"stream\", [])\n\nif len(val_my):\n    print(f\"Best validation accuracy: {val_my.max():.4f}\")\nif len(val_ly):\n    print(f\"Final validation loss: {val_ly[-1]:.4f}\")\nfor m in methods:\n    sx, sy = pairs_to_xy(methods[m].get(\"metrics\", {}).get(\"stream\", []))\n    lx, ly = pairs_to_xy(methods[m].get(\"losses\", {}).get(\"stream\", []))\n    if len(sy):\n        print(f\"{m} mean stream accuracy: {sy.mean():.4f}\")\n    if len(ly):\n        print(f\"{m} mean stream loss: {ly.mean():.4f}\")\n\ntask_boundaries = []\ntask_labels = []\ntry:\n    ref_method = next(iter(methods)) if methods else None\n    if ref_method:\n        names = methods[ref_method].get(\"task_name\", [])\n        prev = None\n        for i, n in enumerate(names):\n            if n != prev:\n                task_boundaries.append(i)\n                task_labels.append(n)\n                prev = n\nexcept Exception:\n    pass\n\ntry:\n    plt.figure(figsize=(7, 4))\n    if len(train_mx):\n        plt.plot(train_mx, train_my, marker=\"o\", label=\"Train\")\n    if len(val_mx):\n        plt.plot(val_mx, val_my, marker=\"o\", label=\"Validation\")\n    plt.xlabel(\"Epoch\")\n    plt.ylabel(\"Accuracy\")\n    plt.title(\n        \"Synthetic Stream Dataset - Pretraining Accuracy Curves\\nTrain vs Validation\"\n    )\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_pretraining_accuracy_curves.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot1: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(7, 4))\n    if len(train_lx):\n        plt.plot(train_lx, train_ly, marker=\"o\", label=\"Train\")\n    if len(val_lx):\n        plt.plot(val_lx, val_ly, marker=\"o\", label=\"Validation\")\n    plt.xlabel(\"Epoch\")\n    plt.ylabel(\"Loss\")\n    plt.title(\"Synthetic Stream Dataset - Pretraining Loss Curves\\nTrain vs Validation\")\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_pretraining_loss_curves.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot2: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(7, 4))\n    if stream_summary:\n        labels = [k for k, _ in stream_summary]\n        vals = [v for _, v in stream_summary]\n        plt.bar(labels, vals)\n    plt.xlabel(\"Method\")\n    plt.ylabel(\"Mean Online Accuracy\")\n    plt.title(\n        \"Synthetic Stream Dataset - Stream-Averaged Online Accuracy\\nMethod Comparison\"\n    )\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_method_stream_accuracy_bar.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot3: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(8, 4))\n    for m, md in methods.items():\n        x, y = pairs_to_xy(md.get(\"metrics\", {}).get(\"stream\", []))\n        if len(x):\n            plt.plot(x, y, label=m)\n    for b in task_boundaries[1:]:\n        plt.axvline(b, color=\"gray\", linestyle=\"--\", linewidth=0.8)\n    plt.xlabel(\"Stream Position\")\n    plt.ylabel(\"Online Accuracy\")\n    plt.title(\n        \"Synthetic Stream Dataset - Online Accuracy Over Stream\\nTask Segments Marked by Vertical Lines\"\n    )\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_online_accuracy_over_stream.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot4: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(8, 4))\n    for m, md in methods.items():\n        x, y = pairs_to_xy(md.get(\"losses\", {}).get(\"stream\", []))\n        if len(x):\n            plt.plot(x, y, label=m)\n    for b in task_boundaries[1:]:\n        plt.axvline(b, color=\"gray\", linestyle=\"--\", linewidth=0.8)\n    plt.xlabel(\"Stream Position\")\n    plt.ylabel(\"Online Supervised Loss\")\n    plt.title(\n        \"Synthetic Stream Dataset - Online Loss Over Stream\\nTask Segments Marked by Vertical Lines\"\n    )\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_online_loss_over_stream.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot5: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(8, 4))\n    for m, md in methods.items():\n        drift = np.array(md.get(\"adapter_drift\", []))\n        if drift.size:\n            plt.plot(np.arange(len(drift)), drift, label=m)\n    for b in task_boundaries[1:]:\n        plt.axvline(b, color=\"gray\", linestyle=\"--\", linewidth=0.8)\n    plt.xlabel(\"Stream Position\")\n    plt.ylabel(\"Adapter Drift\")\n    plt.title(\n        \"Synthetic Stream Dataset - Adapter Drift Over Stream\\nTask Segments Marked by Vertical Lines\"\n    )\n    plt.legend()\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_adapter_drift_over_stream.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot6: {e}\")\n    plt.close()\n\ntry:\n    plt.figure(figsize=(7, 4))\n    if loss_summary:\n        labels = [k for k, _ in loss_summary]\n        vals = [v for _, v in loss_summary]\n        plt.bar(labels, vals)\n    plt.xlabel(\"Method\")\n    plt.ylabel(\"Mean Stream Loss\")\n    plt.title(\n        \"Synthetic Stream Dataset - Stream-Averaged Online Loss\\nMethod Comparison\"\n    )\n    plt.tight_layout()\n    plt.savefig(\n        os.path.join(working_dir, f\"{ds_name}_method_stream_loss_bar.png\"), dpi=150\n    )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot7: {e}\")\n    plt.close()\n"], "plot_plan": ["I\u2019ll load the saved experiment dictionary, inspect the available keys for the synthetic stream dataset, and create only plots supported by those stored arrays. Specifically, I\u2019ll plot pretraining train/validation accuracy and loss curves, a bar chart of stream-averaged method performance, and per-method stream trajectories for online accuracy, online loss, and adapter drift. Since task names are stored per stream step for each method, I\u2019ll also add a compact task-segment visualization by marking task boundaries on the stream plots rather than inventing extra values. To keep figures clear and compliant, every plot will have a descriptive dataset-specific title and be saved into the working directory with informative filenames. Each figure will be generated inside its own try-except block and explicitly closed whether successful or not. I\u2019ll also print concise summary metrics, including best validation accuracy, final validation loss, and each method\u2019s mean online stream accuracy and mean stream loss if available. The code will avoid any synthetic reconstruction and will use only values present in experiment_data.npy. If some keys are missing or malformed, the relevant block will fail gracefully and continue with the remaining plots.", null], "ablation_name": [null, null], "hyperparam_name": [null, null], "is_seed_node": [false, true], "is_seed_agg_node": [false, false], "parse_metrics_plan": ["I\u2019ll write a small analysis script that loads `experiment_data.npy` from the\n`working` directory, inspects the nested dictionary structure, and prints a\nconcise summary for each dataset. For each dataset, it will report the final or\nbest values for the available accuracy and loss metrics from the top-level\nentries, and then do the same for each method-specific streaming result. The\nprinted output will always include the dataset name first and use explicit\nmetric labels like \u201ctrain accuracy,\u201d \u201cvalidation loss,\u201d and \u201cstream mean\naccuracy,\u201d without creating any plots.", "I\u2019ll write a small analysis script that loads `experiment_data.npy` from the\n`working` directory, inspects the nested dictionary structure, and prints a\nconcise summary for each dataset. For each dataset, it will report the final or\nbest values for the available accuracy and loss metrics from the top-level\nentries, and then do the same for each method-specific streaming result. The\nprinted output will always include the dataset name first and use explicit\nmetric labels like \u201ctrain accuracy,\u201d \u201cvalidation loss,\u201d and \u201cstream mean\naccuracy,\u201d without creating any plots."], "parse_metrics_code": ["import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nfile_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(file_path, allow_pickle=True).item()\n\n\ndef to_python_scalar(value):\n    if isinstance(value, np.generic):\n        return value.item()\n    return value\n\n\ndef format_value(value):\n    value = to_python_scalar(value)\n    if isinstance(value, float):\n        return f\"{value:.6f}\"\n    return str(value)\n\n\ndef get_final_from_pairs(pairs):\n    if not pairs:\n        return None\n    return pairs[-1][1]\n\n\ndef get_best_from_pairs(pairs, mode=\"max\"):\n    if not pairs:\n        return None\n    values = [to_python_scalar(v) for _, v in pairs]\n    if mode == \"min\":\n        return min(values)\n    return max(values)\n\n\ndef print_metric(label, value):\n    if value is not None:\n        print(f\"{label}: {format_value(value)}\")\n\n\nfor dataset_name, dataset_data in experiment_data.items():\n    print(f\"Dataset: {dataset_name}\")\n\n    metrics = dataset_data.get(\"metrics\", {})\n    losses = dataset_data.get(\"losses\", {})\n\n    train_accuracy_final = get_final_from_pairs(metrics.get(\"train\", []))\n    train_accuracy_best = get_best_from_pairs(metrics.get(\"train\", []), mode=\"max\")\n    validation_accuracy_final = get_final_from_pairs(metrics.get(\"val\", []))\n    validation_accuracy_best = get_best_from_pairs(metrics.get(\"val\", []), mode=\"max\")\n\n    train_loss_final = get_final_from_pairs(losses.get(\"train\", []))\n    train_loss_best = get_best_from_pairs(losses.get(\"train\", []), mode=\"min\")\n    validation_loss_final = get_final_from_pairs(losses.get(\"val\", []))\n    validation_loss_best = get_best_from_pairs(losses.get(\"val\", []), mode=\"min\")\n\n    stream_summary_metrics = metrics.get(\"stream\", [])\n    stream_summary_losses = losses.get(\"stream\", [])\n\n    if train_accuracy_final is not None:\n        print_metric(\"Final train accuracy\", train_accuracy_final)\n    if train_accuracy_best is not None:\n        print_metric(\"Best train accuracy\", train_accuracy_best)\n    if validation_accuracy_final is not None:\n        print_metric(\"Final validation accuracy\", validation_accuracy_final)\n    if validation_accuracy_best is not None:\n        print_metric(\"Best validation accuracy\", validation_accuracy_best)\n\n    if train_loss_final is not None:\n        print_metric(\"Final train loss\", train_loss_final)\n    if train_loss_best is not None:\n        print_metric(\"Best train loss\", train_loss_best)\n    if validation_loss_final is not None:\n        print_metric(\"Final validation loss\", validation_loss_final)\n    if validation_loss_best is not None:\n        print_metric(\"Best validation loss\", validation_loss_best)\n\n    if stream_summary_metrics:\n        for method_name, metric_value in stream_summary_metrics:\n            print_metric(f\"Final stream mean accuracy ({method_name})\", metric_value)\n\n    if stream_summary_losses:\n        for method_name, loss_value in stream_summary_losses:\n            print_metric(f\"Final stream mean loss ({method_name})\", loss_value)\n\n    methods = dataset_data.get(\"methods\", {})\n    for method_name, method_data in methods.items():\n        print(f\"Dataset: {dataset_name} | Method: {method_name}\")\n\n        method_metrics = method_data.get(\"metrics\", {})\n        method_losses = method_data.get(\"losses\", {})\n\n        stream_accuracy_final = get_final_from_pairs(method_metrics.get(\"stream\", []))\n        stream_accuracy_best = get_best_from_pairs(\n            method_metrics.get(\"stream\", []), mode=\"max\"\n        )\n\n        stream_loss_final = get_final_from_pairs(method_losses.get(\"stream\", []))\n        stream_loss_best = get_best_from_pairs(\n            method_losses.get(\"stream\", []), mode=\"min\"\n        )\n\n        adapter_drift = method_data.get(\"adapter_drift\", [])\n        final_adapter_drift = adapter_drift[-1] if adapter_drift else None\n        best_adapter_drift = min(adapter_drift) if adapter_drift else None\n\n        print_metric(\"Final online stream accuracy\", stream_accuracy_final)\n        print_metric(\"Best online stream accuracy\", stream_accuracy_best)\n        print_metric(\"Final online stream loss\", stream_loss_final)\n        print_metric(\"Best online stream loss\", stream_loss_best)\n        print_metric(\"Final adapter drift\", final_adapter_drift)\n        print_metric(\"Best adapter drift\", best_adapter_drift)\n", "import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nfile_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(file_path, allow_pickle=True).item()\n\n\ndef to_python_scalar(value):\n    if isinstance(value, np.generic):\n        return value.item()\n    return value\n\n\ndef format_value(value):\n    value = to_python_scalar(value)\n    if isinstance(value, float):\n        return f\"{value:.6f}\"\n    return str(value)\n\n\ndef get_final_from_pairs(pairs):\n    if not pairs:\n        return None\n    return pairs[-1][1]\n\n\ndef get_best_from_pairs(pairs, mode=\"max\"):\n    if not pairs:\n        return None\n    values = [to_python_scalar(v) for _, v in pairs]\n    if mode == \"min\":\n        return min(values)\n    return max(values)\n\n\ndef print_metric(label, value):\n    if value is not None:\n        print(f\"{label}: {format_value(value)}\")\n\n\nfor dataset_name, dataset_data in experiment_data.items():\n    print(f\"Dataset: {dataset_name}\")\n\n    metrics = dataset_data.get(\"metrics\", {})\n    losses = dataset_data.get(\"losses\", {})\n\n    train_accuracy_final = get_final_from_pairs(metrics.get(\"train\", []))\n    train_accuracy_best = get_best_from_pairs(metrics.get(\"train\", []), mode=\"max\")\n    validation_accuracy_final = get_final_from_pairs(metrics.get(\"val\", []))\n    validation_accuracy_best = get_best_from_pairs(metrics.get(\"val\", []), mode=\"max\")\n\n    train_loss_final = get_final_from_pairs(losses.get(\"train\", []))\n    train_loss_best = get_best_from_pairs(losses.get(\"train\", []), mode=\"min\")\n    validation_loss_final = get_final_from_pairs(losses.get(\"val\", []))\n    validation_loss_best = get_best_from_pairs(losses.get(\"val\", []), mode=\"min\")\n\n    stream_summary_metrics = metrics.get(\"stream\", [])\n    stream_summary_losses = losses.get(\"stream\", [])\n\n    if train_accuracy_final is not None:\n        print_metric(\"Final train accuracy\", train_accuracy_final)\n    if train_accuracy_best is not None:\n        print_metric(\"Best train accuracy\", train_accuracy_best)\n    if validation_accuracy_final is not None:\n        print_metric(\"Final validation accuracy\", validation_accuracy_final)\n    if validation_accuracy_best is not None:\n        print_metric(\"Best validation accuracy\", validation_accuracy_best)\n\n    if train_loss_final is not None:\n        print_metric(\"Final train loss\", train_loss_final)\n    if train_loss_best is not None:\n        print_metric(\"Best train loss\", train_loss_best)\n    if validation_loss_final is not None:\n        print_metric(\"Final validation loss\", validation_loss_final)\n    if validation_loss_best is not None:\n        print_metric(\"Best validation loss\", validation_loss_best)\n\n    if stream_summary_metrics:\n        for method_name, metric_value in stream_summary_metrics:\n            print_metric(f\"Final stream mean accuracy ({method_name})\", metric_value)\n\n    if stream_summary_losses:\n        for method_name, loss_value in stream_summary_losses:\n            print_metric(f\"Final stream mean loss ({method_name})\", loss_value)\n\n    methods = dataset_data.get(\"methods\", {})\n    for method_name, method_data in methods.items():\n        print(f\"Dataset: {dataset_name} | Method: {method_name}\")\n\n        method_metrics = method_data.get(\"metrics\", {})\n        method_losses = method_data.get(\"losses\", {})\n\n        stream_accuracy_final = get_final_from_pairs(method_metrics.get(\"stream\", []))\n        stream_accuracy_best = get_best_from_pairs(\n            method_metrics.get(\"stream\", []), mode=\"max\"\n        )\n\n        stream_loss_final = get_final_from_pairs(method_losses.get(\"stream\", []))\n        stream_loss_best = get_best_from_pairs(\n            method_losses.get(\"stream\", []), mode=\"min\"\n        )\n\n        adapter_drift = method_data.get(\"adapter_drift\", [])\n        final_adapter_drift = adapter_drift[-1] if adapter_drift else None\n        best_adapter_drift = min(adapter_drift) if adapter_drift else None\n\n        print_metric(\"Final online stream accuracy\", stream_accuracy_final)\n        print_metric(\"Best online stream accuracy\", stream_accuracy_best)\n        print_metric(\"Final online stream loss\", stream_loss_final)\n        print_metric(\"Best online stream loss\", stream_loss_best)\n        print_metric(\"Final adapter drift\", final_adapter_drift)\n        print_metric(\"Best adapter drift\", best_adapter_drift)\n"], "parse_term_out": ["['Dataset: synthetic_stream', '\\n', 'Final train accuracy: 0.860000', '\\n',\n'Best train accuracy: 0.861500', '\\n', 'Final validation accuracy: 0.871667',\n'\\n', 'Best validation accuracy: 0.876667', '\\n', 'Final train loss: 0.332915',\n'\\n', 'Best train loss: 0.332915', '\\n', 'Final validation loss: 0.314816',\n'\\n', 'Best validation loss: 0.314816', '\\n', 'Final stream mean accuracy\n(reset): 0.856944', '\\n', 'Final stream mean accuracy (carry): 0.860764', '\\n',\n'Final stream mean accuracy (anchored): 0.860764', '\\n', 'Final stream mean loss\n(reset): 0.346378', '\\n', 'Final stream mean loss (carry): 0.344645', '\\n',\n'Final stream mean loss (anchored): 0.344635', '\\n', 'Dataset: synthetic_stream\n| Method: reset', '\\n', 'Final online stream accuracy: 0.833333', '\\n', 'Best\nonline stream accuracy: 0.937500', '\\n', 'Final online stream loss: 0.345620',\n'\\n', 'Best online stream loss: 0.219262', '\\n', 'Final adapter drift:\n0.000003', '\\n', 'Best adapter drift: 0.000002', '\\n', 'Dataset:\nsynthetic_stream | Method: carry', '\\n', 'Final online stream accuracy:\n0.916667', '\\n', 'Best online stream accuracy: 0.937500', '\\n', 'Final online\nstream loss: 0.313877', '\\n', 'Best online stream loss: 0.213726', '\\n', 'Final\nadapter drift: 0.004565', '\\n', 'Best adapter drift: 0.000004', '\\n', 'Dataset:\nsynthetic_stream | Method: anchored', '\\n', 'Final online stream accuracy:\n0.916667', '\\n', 'Best online stream accuracy: 0.937500', '\\n', 'Final online\nstream loss: 0.313927', '\\n', 'Best online stream loss: 0.213730', '\\n', 'Final\nadapter drift: 0.004545', '\\n', 'Best adapter drift: 0.000004', '\\n', 'Execution\ntime: a moment seconds (time limit is 2 hours).']", "['Dataset: synthetic_stream', '\\n', 'Final train accuracy: 0.860000', '\\n',\n'Best train accuracy: 0.861500', '\\n', 'Final validation accuracy: 0.871667',\n'\\n', 'Best validation accuracy: 0.876667', '\\n', 'Final train loss: 0.332915',\n'\\n', 'Best train loss: 0.332915', '\\n', 'Final validation loss: 0.314816',\n'\\n', 'Best validation loss: 0.314816', '\\n', 'Final stream mean accuracy\n(reset): 0.856944', '\\n', 'Final stream mean accuracy (carry): 0.860764', '\\n',\n'Final stream mean accuracy (anchored): 0.860764', '\\n', 'Final stream mean loss\n(reset): 0.346378', '\\n', 'Final stream mean loss (carry): 0.344645', '\\n',\n'Final stream mean loss (anchored): 0.344635', '\\n', 'Dataset: synthetic_stream\n| Method: reset', '\\n', 'Final online stream accuracy: 0.833333', '\\n', 'Best\nonline stream accuracy: 0.937500', '\\n', 'Final online stream loss: 0.345620',\n'\\n', 'Best online stream loss: 0.219262', '\\n', 'Final adapter drift:\n0.000003', '\\n', 'Best adapter drift: 0.000002', '\\n', 'Dataset:\nsynthetic_stream | Method: carry', '\\n', 'Final online stream accuracy:\n0.916667', '\\n', 'Best online stream accuracy: 0.937500', '\\n', 'Final online\nstream loss: 0.313877', '\\n', 'Best online stream loss: 0.213726', '\\n', 'Final\nadapter drift: 0.004565', '\\n', 'Best adapter drift: 0.000004', '\\n', 'Dataset:\nsynthetic_stream | Method: anchored', '\\n', 'Final online stream accuracy:\n0.916667', '\\n', 'Best online stream accuracy: 0.937500', '\\n', 'Final online\nstream loss: 0.313927', '\\n', 'Best online stream loss: 0.213730', '\\n', 'Final\nadapter drift: 0.004545', '\\n', 'Best adapter drift: 0.000004', '\\n', 'Execution\ntime: a moment seconds (time limit is 2 hours).']"], "parse_exc_type": [null, null], "parse_exc_info": [null, null], "parse_exc_stack": [null, null], "completed_stages": ["Stage_1"]};
+
+// Add log directory path and stage info to the tree data
+treeStructData.log_dir_path = window.location.pathname.split('/').slice(0, -1).join('/');
+treeStructData.current_stage = window.location.pathname.includes('stage_')
+  ? window.location.pathname.split('stage_')[1].split('/')[0]
+  : 'Stage_1';
+
+// Initialize background color
+window.bgColCurrent = bgCol;
+
+// Function to set background color that can be called from the console
+function setBackgroundColor(color) {
+  // Update the global color
+  updateBackgroundColor(color);
+
+  // Refresh the current sketch to apply the new background color
+  if (currentStage) {
+    startSketch(currentStage);
+  }
+}
+
+// Load all stage data and initialize the visualization
+loadAllStageData(treeStructData);
+
+    </script>
+    <title>AI Scientist-v2 Visualization</title>
+    <style>
+      body,
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background-color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      #canvas-container {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 40vw;
+        height: 100vh;
+        background-color: inherit;
+        padding-top: 40px;
+      }
+      canvas {
+        float: left;
+        height: 100vh;
+        width: 100vw;
+      }
+      #text-container {
+        float: right;
+        height: 100vh;
+        width: 50vw;
+        background-color: #282c34;
+        overflow: auto;
+      }
+      #plan {
+        /* border-left: 2px solid #282c34; */
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+      }
+      #plot_plan {
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+        white-space: pre-wrap;
+      }
+      #exec_time_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exec_time {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exc_info {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #2c1f1f;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #metrics {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+      }
+      #vlm_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #1f2c2f;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      #vlm_feedback p {
+        margin: 0.5em 0;
+        white-space: pre-wrap;
+      }
+      .datasets_successfully_tested {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      .plots-container {
+        float: right;
+        width: 50vw;
+        padding: 1rem;
+        background-color: #282c34;
+        margin-top: 1rem;
+      }
+
+      .plot-item {
+        flex: 1 1 300px;
+        max-width: 100%;
+        margin-bottom: 1rem;
+        white-space: pre-wrap;
+      }
+
+      .plot-item img {
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: block;
+      }
+
+      .metric-group {
+        margin-bottom: 20px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+
+      .metric-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+
+      .metric-table th,
+      .metric-table td {
+        padding: 8px;
+        text-align: left;
+        border: 1px solid #ddd;
+      }
+
+      .metric-table th {
+        background-color: #363b44;
+      }
+
+      /* Styles for tabs */
+      .tabs-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 49vw;
+        background-color: #000000;
+        z-index: 10;
+        display: flex;
+        padding: 0;
+      }
+
+      .tab {
+        cursor: pointer;
+        padding: 10px 15px;
+        background-color: #333;
+        color: #f2f0e7;
+        border: none;
+        outline: none;
+        transition: background-color 0.3s;
+        flex: 1;
+        text-align: center;
+      }
+
+      .tab:hover {
+        background-color: #444;
+      }
+
+      .tab.active {
+        background-color: #4c76af;
+        font-weight: bold;
+      }
+
+      .tab.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background-color: #282c34;
+      }
+
+      .tab-content {
+        display: none;
+        padding-top: 40px; /* Space for tabs */
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .stage-info {
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        margin-bottom: 10px;
+        font-size: 0.9em;
+      }
+
+      .stage-status {
+        display: inline-block;
+        padding: 3px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+        font-size: 0.8em;
+      }
+
+      .stage-status.completed {
+        background-color: #4caf50;
+      }
+
+      .stage-status.in-progress {
+        background-color: #2196f3;
+      }
+
+      .stage-status.not-started {
+        background-color: #9e9e9e;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tabs-container" id="stage-tabs">
+      <button class="tab" data-stage="Stage_1" onclick="selectStage('Stage_1')">Stage 1</button>
+      <button class="tab" data-stage="Stage_2" onclick="selectStage('Stage_2')">Stage 2</button>
+      <button class="tab" data-stage="Stage_3" onclick="selectStage('Stage_3')">Stage 3</button>
+      <button class="tab" data-stage="Stage_4" onclick="selectStage('Stage_4')">Stage 4</button>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <pre id="text-container">
+        <div id="stage-info" class="stage-info"></div>
+        <div id="plan"></div>
+        <hr>
+        <div id="exc_info"></div>
+        <hr>
+        <div id="exec_time"></div>
+        <hr>
+        <div id="exec_time_feedback"></div>
+        <hr>
+        <div id="metrics"></div>
+        <hr>
+        <div id="plot_plan"></div>
+        <hr>
+        <div class="plots-container" id="plots"></div>
+        <hr>
+        <div id="vlm_feedback"></div>
+        <hr>
+        <div id="datasets_successfully_tested"></div>
+        <hr>
+        <code id="code" class="language-python"></code>
+        <hr>
+        <code id="plot_code" class="language-python"></code>
+    </pre>
+  </body>
+</html>

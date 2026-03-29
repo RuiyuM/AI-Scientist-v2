@@ -1,0 +1,52 @@
+agent:
+  code:
+    max_tokens: 12000
+    model: gpt-5.4
+    temp: 1.0
+  data_preview: false
+  expose_prediction: false
+  feedback:
+    max_tokens: 8192
+    model: gpt-5.4
+    temp: 0.5
+  k_fold_validation: 1
+  max_workers_per_gpu: 1
+  multi_seed_eval:
+    num_seeds: 1
+  num_workers: 1
+  search:
+    debug_prob: 0.4
+    max_debug_depth: 2
+    num_drafts: 1
+  stages:
+    stage1_max_iters: 12
+    stage2_max_iters: 8
+    stage3_max_iters: 8
+    stage4_max_iters: 10
+  steps: 5
+  type: parallel
+  vlm_feedback:
+    max_tokens: null
+    model: gpt-5.4
+    temp: 0.5
+copy_data: true
+data_dir: experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/data
+debug:
+  stage4: false
+desc_file: experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/idea.json
+eval: null
+exec:
+  agent_file_name: runfile.py
+  format_tb_ipython: false
+  timeout: 5400
+exp_name: run
+experiment:
+  num_syn_datasets: 1
+generate_report: true
+goal: null
+log_dir: experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs
+preprocess_data: false
+report:
+  model: gpt-5.4
+  temp: 1.0
+workspace_dir: experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0

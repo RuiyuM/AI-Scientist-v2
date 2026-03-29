@@ -43,13 +43,66 @@ for exp_dir in "${SRC_ROOT}"/*; do
   for rel_path in \
     "idea.md" \
     "idea.json" \
+    "bfts_config.yaml" \
     "token_tracker.json" \
+    "token_tracker_interactions.json" \
     "review_text.txt" \
     "review_img_cap_ref.json" \
+    "cached_citations.bib" \
+    "citations_progress.json" \
+    "auto_plot_aggregator.py" \
     "logs/0-run/unified_tree_viz.html"
   do
     copy_if_small "${exp_dir}/${rel_path}" "${dest_dir}/${rel_path}"
   done
+
+  while IFS= read -r -d '' artifact; do
+    rel_path="${artifact#${exp_dir}/}"
+    copy_if_small "${artifact}" "${dest_dir}/${rel_path}"
+  done < <(
+    find "${exp_dir}/0-run" -type f \
+      \( -name 'runfile.py' \) -print0 2>/dev/null
+  )
+
+  while IFS= read -r -d '' artifact; do
+    rel_path="${artifact#${exp_dir}/}"
+    copy_if_small "${artifact}" "${dest_dir}/${rel_path}"
+  done < <(
+    find "${exp_dir}/logs/0-run" -type f \
+      \( \
+        -name 'best_solution_*.py' -o \
+        -name 'experiment_code.py' -o \
+        -name 'plotting_code.py' -o \
+        -name 'journal.json' -o \
+        -name 'config.yaml' -o \
+        -name 'stage_progress.json' -o \
+        -name 'tree_plot.html' -o \
+        -name '*.png' -o \
+        -name '*.jpg' -o \
+        -name '*.jpeg' \
+      \) -print0 2>/dev/null
+  )
+
+  while IFS= read -r -d '' artifact; do
+    rel_path="${artifact#${exp_dir}/}"
+    copy_if_small "${artifact}" "${dest_dir}/${rel_path}"
+  done < <(
+    find "${exp_dir}/figures" -type f \
+      \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) -print0 2>/dev/null
+  )
+
+  while IFS= read -r -d '' artifact; do
+    rel_path="${artifact#${exp_dir}/}"
+    copy_if_small "${artifact}" "${dest_dir}/${rel_path}"
+  done < <(
+    find "${exp_dir}/latex" -type f \
+      \( \
+        -name '*.tex' -o \
+        -name '*.bib' -o \
+        -name '*.sty' -o \
+        -name '*.cls' \
+      \) -print0 2>/dev/null
+  )
 
   for pdf_file in "${exp_dir}"/*.pdf; do
     [[ -f "${pdf_file}" ]] || continue

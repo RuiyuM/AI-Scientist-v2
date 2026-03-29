@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Check if we're running under Live Server
+      if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+          let lastModified = '';
+
+          // Check for file changes every second
+          setInterval(async () => {
+              try {
+                  const response = await fetch(window.location.href, { method: 'HEAD' });
+                  // get a timestamp that shows when the file was last changed
+                  const currentModified = response.headers.get('last-modified');
+
+                  if (lastModified && lastModified !== currentModified) {
+                      window.location.reload();
+                  }
+
+                  lastModified = currentModified;
+              } catch (e) {
+                  console.error('Error checking for updates:', e);
+              }
+          }, 1000);
+      }
+  </script>
+    <script
+      id="p5scripttag"
+      src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"
+      integrity="sha512-uaz5GpnQoE6t5echKlX8P52czvsIGgLPcvlzfvRubLZ1Hp8JemUDnbUiAahbVtPb+jUVrNETuXvAhDDF/N3M4w=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+
+    <script>
+      const bgCol = "#FFFFFF";
+const accentCol = "#1a439e";
+
+hljs.initHighlightingOnLoad();
+
+// Function to update background color globally
+function updateBackgroundColor(color) {
+  // Update the JS variable
+  window.bgColCurrent = color;
+
+  // Update body background
+  document.body.style.backgroundColor = color;
+
+  // Update canvas container background
+  const canvasContainer = document.getElementById('canvas-container');
+  if (canvasContainer) {
+    canvasContainer.style.backgroundColor = color;
+  }
+}
+
+// Store tree data for each stage
+const stageData = {
+  Stage_1: null,
+  Stage_2: null,
+  Stage_3: null,
+  Stage_4: null
+};
+
+// Keep track of current selected stage
+let currentStage = null;
+let currentSketch = null;
+let availableStages = [];
+
+// Class definitions for nodes and edges
+class Node {
+  constructor(x, y, id, isRoot = false) {
+    this.x = x;
+    this.y = y;
+    this.id = id;
+    this.visible = isRoot; // Only root nodes are visible initially
+    this.appearProgress = 0;
+    this.popEffect = 0;
+    this.selected = false;
+    this.isRootNode = isRoot;
+  }
+
+  update() {
+    if (this.visible) {
+      // Handle the main appearance animation
+      if (this.appearProgress < 1) {
+        this.appearProgress += 0.06;
+
+        // When we reach full size, trigger the pop effect
+        if (this.appearProgress >= 1) {
+          this.appearProgress = 1; // Cap at 1
+          this.popEffect = 1; // Start the pop effect
+        }
+      }
+
+      // Handle the pop effect animation
+      if (this.popEffect > 0) {
+        this.popEffect -= 0.15; // Control how quickly it shrinks back
+        if (this.popEffect < 0) this.popEffect = 0; // Don't go negative
+      }
+    }
+  }
+
+  startAnimation() {
+    this.visible = true;
+  }
+
+  color() {
+    if (this.selected) {
+      return accentCol; // Use the global accent color variable for selected node
+    }
+    return '#4263eb'; // Default blue color
+  }
+
+  render(p5) {
+    if (this.visible) {
+      const popBonus = this.popEffect * 0.1;
+      const nodeScale = p5.map(this.appearProgress, 0, 1, 0, 1) + popBonus;
+      const alpha = p5.map(this.appearProgress, 0, 1, 0, 255);
+
+      p5.push();
+      p5.translate(this.x, this.y);
+
+      // Shadow effect
+      p5.noStroke();
+      p5.rectMode(p5.CENTER);
+
+      for (let i = 1; i <= 4; i++) {
+        p5.fill(0, 0, 0, alpha * 0.06);
+        p5.rect(i, i, 30 * nodeScale, 30 * nodeScale, 10);
+      }
+
+      // Main square - use node's color with alpha
+      let nodeColor = p5.color(this.color());
+      nodeColor.setAlpha(alpha);
+      p5.fill(nodeColor);
+      p5.rect(0, 0, 30 * nodeScale, 30 * nodeScale, 10);
+
+      // Draw checkmark icon if the node is selected
+      if (this.selected && this.appearProgress >= 1) {
+        p5.stroke(255);
+        p5.strokeWeight(2 * nodeScale);
+        p5.noFill();
+        // Draw checkmark
+        p5.beginShape();
+        p5.vertex(-8, 0);
+        p5.vertex(-3, 5);
+        p5.vertex(8, -6);
+        p5.endShape();
+      }
+
+      p5.pop();
+    }
+  }
+
+  isMouseOver(p5) {
+    return this.visible &&
+           p5.mouseX > this.x - 15 &&
+           p5.mouseX < this.x + 15 &&
+           p5.mouseY > this.y - 15 &&
+           p5.mouseY < this.y + 15;
+  }
+
+  // Connect this node to a child node
+  child(childNode) {
+    // Create an edge from this node to the child
+    let isLeft = childNode.x < this.x;
+    let isRight = childNode.x > this.x;
+    let edge = new Edge(this, childNode, isLeft, isRight);
+    return edge;
+  }
+}
+
+class Edge {
+  constructor(parent, child, isLeft, isRight) {
+    this.parent = parent;
+    this.child = child;
+    this.isLeft = isLeft;
+    this.isRight = isRight;
+    this.progress = 0;
+
+    // Calculate the midpoint where branching occurs
+    this.midY = parent.y + (child.y - parent.y) * 0.6;
+
+    // Use the actual child x-coordinate
+    // This ensures the edge will connect directly to the child node
+    this.branchX = child.x;
+  }
+
+  update() {
+    if (this.parent.visible && this.progress < 1) {
+      this.progress += 0.01; // Adjust animation speed
+    }
+    if (this.progress >= 1) {
+      this.child.visible = true;
+    }
+  }
+
+  color() {
+    return this.child.color();
+  }
+
+  render(p5) {
+    if (!this.parent.visible) return;
+
+    // Calculate path lengths
+    const verticalDist1 = this.midY - this.parent.y;
+    const horizontalDist = Math.abs(this.branchX - this.parent.x);
+    const verticalDist2 = this.child.y - this.midY;
+    const totalLength = verticalDist1 + horizontalDist + verticalDist2;
+
+    // Calculate how much of each segment to draw
+    const currentLength = totalLength * this.progress;
+
+    p5.stroke(180, 190, 205);
+    p5.strokeWeight(1.5);
+    p5.noFill();
+
+    // Always draw the first vertical segment from parent
+    if (currentLength > 0) {
+      const firstSegmentLength = Math.min(currentLength, verticalDist1);
+      const currentMidY = p5.lerp(this.parent.y, this.midY, firstSegmentLength / verticalDist1);
+      p5.line(this.parent.x, this.parent.y, this.parent.x, currentMidY);
+    }
+
+    if (currentLength > verticalDist1) {
+      // Draw second segment (horizontal)
+      const secondSegmentLength = Math.min(currentLength - verticalDist1, horizontalDist);
+      const currentBranchX = p5.lerp(this.parent.x, this.branchX, secondSegmentLength / horizontalDist);
+      p5.line(this.parent.x, this.midY, currentBranchX, this.midY);
+
+      if (currentLength > verticalDist1 + horizontalDist) {
+        // Draw third segment (vertical to child)
+        const thirdSegmentLength = currentLength - verticalDist1 - horizontalDist;
+        const currentChildY = p5.lerp(this.midY, this.child.y, thirdSegmentLength / verticalDist2);
+        p5.line(this.branchX, this.midY, this.branchX, currentChildY);
+      }
+    }
+  }
+}
+
+// Create a modified sketch for each stage
+function createTreeSketch(stageId) {
+  return function(p5) {
+    let nodes = [];
+    let edges = [];
+    let treeData = stageData[stageId];
+
+    p5.setup = function() {
+      const canvas = p5.createCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+      canvas.parent('canvas-container');
+      p5.smooth();
+      p5.frameRate(60);
+
+      if (treeData) {
+        createTreeFromData(treeData);
+      }
+    };
+
+    p5.windowResized = function() {
+      p5.resizeCanvas(p5.windowWidth * 0.4, p5.windowHeight);
+    };
+
+    function createTreeFromData(data) {
+      // Clear existing nodes and edges
+      nodes = [];
+      edges = [];
+
+      // Add defensive checks to prevent errors
+      if (!data || !data.layout || !Array.isArray(data.layout) || !data.edges || !Array.isArray(data.edges)) {
+        console.error("Invalid tree data format:", data);
+        return; // Exit if data structure is invalid
+      }
+
+      // Find all parent nodes in edges
+      const parentNodes = new Set();
+      for (const [parentId, childId] of data.edges) {
+        parentNodes.add(parentId);
+      }
+
+      // Create nodes
+      for (let i = 0; i < data.layout.length; i++) {
+        const [nx, ny] = data.layout[i];
+        // A node is a root if it's a parent and not a child in any edge
+        const isRoot = parentNodes.has(i) && data.edges.every(edge => edge[1] !== i);
+
+        const node = new Node(
+          nx * p5.width * 0.8 + p5.width * 0.1,
+          ny * p5.height * 0.8 + p5.height * 0.1,
+          i,
+          isRoot
+        );
+        nodes.push(node);
+      }
+
+      // If no root was found, make the first parent node visible
+      if (!nodes.some(node => node.visible) && parentNodes.size > 0) {
+        // Get the first parent node
+        const firstParentId = [...parentNodes][0];
+        if (nodes[firstParentId]) {
+          nodes[firstParentId].visible = true;
+        }
+      }
+
+      // Create edges
+      for (const [parentId, childId] of data.edges) {
+        const parent = nodes[parentId];
+        const child = nodes[childId];
+        if (parent && child) { // Verify both nodes exist
+          const isLeft = child.x < parent.x;
+          const isRight = child.x > parent.x;
+          edges.push(new Edge(parent, child, isLeft, isRight));
+        }
+      }
+
+      // Select the first node by default
+      if (nodes.length > 0) {
+        nodes[0].selected = true;
+        updateNodeInfo(0);
+      }
+    }
+
+    p5.draw = function() {
+      // Use the global background color if available, otherwise use the default bgCol
+      const currentBgColor = window.bgColCurrent || bgCol;
+      p5.background(currentBgColor);
+
+      // Update and render edges
+      for (const edge of edges) {
+        edge.update();
+        edge.render(p5);
+      }
+
+      // Update and render nodes
+      for (const node of nodes) {
+        node.update();
+        node.render(p5);
+      }
+
+      // Handle mouse hover
+      p5.cursor(p5.ARROW);
+      for (const node of nodes) {
+        if (node.isMouseOver(p5)) {
+          p5.cursor(p5.HAND);
+        }
+      }
+    };
+
+    p5.mousePressed = function() {
+      // Check if any node was clicked
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].visible && nodes[i].isMouseOver(p5)) {
+          // Deselect all nodes
+          nodes.forEach(n => n.selected = false);
+          // Select the clicked node
+          nodes[i].selected = true;
+          // Update the right panel with node info
+          updateNodeInfo(i);
+          break;
+        }
+      }
+    };
+
+    function updateNodeInfo(nodeIndex) {
+      if (treeData) {
+        setNodeInfo(
+          treeData.code[nodeIndex],
+          treeData.plan[nodeIndex],
+          treeData.plot_code?.[nodeIndex],
+          treeData.plot_plan?.[nodeIndex],
+          treeData.metrics?.[nodeIndex],
+          treeData.exc_type?.[nodeIndex] || '',
+          treeData.exc_info?.[nodeIndex]?.args?.[0] || '',
+          treeData.exc_stack?.[nodeIndex] || [],
+          treeData.plots?.[nodeIndex] || [],
+          treeData.plot_analyses?.[nodeIndex] || [],
+          treeData.vlm_feedback_summary?.[nodeIndex] || '',
+          treeData.datasets_successfully_tested?.[nodeIndex] || [],
+          treeData.exec_time_feedback?.[nodeIndex] || '',
+          treeData.exec_time?.[nodeIndex] || ''
+        );
+      }
+    }
+  };
+}
+
+// Start a new p5 sketch for the given stage
+function startSketch(stageId) {
+  if (currentSketch) {
+    currentSketch.remove();
+  }
+
+  if (stageData[stageId]) {
+    currentSketch = new p5(createTreeSketch(stageId));
+
+    // Update stage info
+    const stageNumber = stageId.split('_')[1];
+    let stageDesc = '';
+    switch(stageId) {
+      case 'Stage_1': stageDesc = 'Preliminary Investigation'; break;
+      case 'Stage_2': stageDesc = 'Baseline Tuning'; break;
+      case 'Stage_3': stageDesc = 'Research Agenda Execution'; break;
+      case 'Stage_4': stageDesc = 'Ablation Studies'; break;
+    }
+
+    document.getElementById('stage-info').innerHTML =
+      `<strong>Current Stage: ${stageNumber} - ${stageDesc}</strong>`;
+  }
+}
+
+// Handle tab selection
+function selectStage(stageId) {
+  if (!stageData[stageId] || !availableStages.includes(stageId)) {
+    return; // Don't allow selection of unavailable stages
+  }
+
+  // Update active tab styles
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  document.querySelector(`.tab[data-stage="${stageId}"]`).classList.add('active');
+
+  // Start the new sketch
+  currentStage = stageId;
+  startSketch(stageId);
+}
+
+// Function to load the tree data for all stages
+async function loadAllStageData(baseTreeData) {
+  console.log("Loading stage data with base data:", baseTreeData);
+
+  // The base tree data is for the current stage
+  const currentStageId = baseTreeData.current_stage || 'Stage_1';
+
+  // Ensure base tree data is valid and has required properties
+  if (baseTreeData && baseTreeData.layout && baseTreeData.edges) {
+    stageData[currentStageId] = baseTreeData;
+    availableStages.push(currentStageId);
+    console.log(`Added current stage ${currentStageId} to available stages`);
+  } else {
+    console.warn(`Current stage ${currentStageId} data is invalid:`, baseTreeData);
+  }
+
+  // Use relative path to load other stage trees
+  const logDirPath = baseTreeData.log_dir_path || '.';
+  console.log("Log directory path:", logDirPath);
+
+  // Load data for each stage if available
+  const stageNames = ['Stage_1', 'Stage_2', 'Stage_3', 'Stage_4'];
+  const stageNames2actualNames = {
+    'Stage_1': 'stage_1_initial_implementation_1_preliminary',
+    'Stage_2': 'stage_2_baseline_tuning_1_first_attempt',
+    'Stage_3': 'stage_3_creative_research_1_first_attempt',
+    'Stage_4': 'stage_4_ablation_studies_1_first_attempt'
+    }
+
+  for (const stage of stageNames) {
+
+    if (baseTreeData.completed_stages && baseTreeData.completed_stages.includes(stage)) {
+      try {
+        console.log(`Attempting to load data for ${stage} from ${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+        const response = await fetch(`${logDirPath}/${stageNames2actualNames[stage]}/tree_data.json`);
+
+        if (response.ok) {
+          const data = await response.json();
+
+          // Validate the loaded data
+          if (data && data.layout && data.edges) {
+            stageData[stage] = data;
+            availableStages.push(stage);
+            console.log(`Successfully loaded and validated data for ${stage}`);
+          } else {
+            console.warn(`Loaded data for ${stage} is invalid:`, data);
+          }
+        } else {
+          console.warn(`Failed to load data for ${stage} - HTTP status ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`Error loading data for ${stage}:`, error);
+      }
+    } else {
+      console.log(`Skipping stage ${stage} - not in completed stages list:`, baseTreeData.completed_stages);
+    }
+  }
+
+  // Update tab visibility based on available stages
+  updateTabVisibility();
+
+  // Start with the first available stage
+  if (availableStages.length > 0) {
+    selectStage(availableStages[0]);
+  } else {
+    console.warn("No stages available to display");
+    // Display a message in the canvas area
+    document.getElementById('canvas-container').innerHTML =
+      '<div style="padding: 20px; color: #333; text-align: center;"><h3>No valid tree data available to display</h3></div>';
+  }
+}
+
+// Update tab visibility based on available stages
+function updateTabVisibility() {
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(tab => {
+    const stageId = tab.getAttribute('data-stage');
+    if (availableStages.includes(stageId)) {
+      tab.classList.remove('disabled');
+    } else {
+      tab.classList.add('disabled');
+    }
+  });
+}
+
+// Utility function to set the node info in the right panel
+const setNodeInfo = (code, plan, plot_code, plot_plan, metrics = null, exc_type = '', exc_info = '',
+    exc_stack = [], plots = [], plot_analyses = [], vlm_feedback_summary = '',
+    datasets_successfully_tested = [], exec_time_feedback = '', exec_time = '') => {
+  const codeElm = document.getElementById("code");
+  if (codeElm) {
+    if (code) {
+      codeElm.innerHTML = hljs.highlight(code, { language: "python" }).value;
+    } else {
+      codeElm.innerHTML = '<p>No code available</p>';
+    }
+  }
+
+  const planElm = document.getElementById("plan");
+  if (planElm) {
+    if (plan) {
+      planElm.innerHTML = hljs.highlight(plan, { language: "plaintext" }).value;
+    } else {
+      planElm.innerHTML = '<p>No plan available</p>';
+    }
+  }
+
+  const plot_codeElm = document.getElementById("plot_code");
+  if (plot_codeElm) {
+    if (plot_code) {
+      plot_codeElm.innerHTML = hljs.highlight(plot_code, { language: "python" }).value;
+    } else {
+      plot_codeElm.innerHTML = '<p>No plot code available</p>';
+    }
+  }
+
+  const plot_planElm = document.getElementById("plot_plan");
+  if (plot_planElm) {
+    if (plot_plan) {
+      plot_planElm.innerHTML = hljs.highlight(plot_plan, { language: "plaintext" }).value;
+    } else {
+      plot_planElm.innerHTML = '<p>No plot plan available</p>';
+    }
+  }
+
+  const metricsElm = document.getElementById("metrics");
+  if (metricsElm) {
+      let metricsContent = `<h3>Metrics:</h3>`;
+      if (metrics && metrics.metric_names) {
+          for (const metric of metrics.metric_names) {
+              metricsContent += `<div class="metric-group">`;
+              metricsContent += `<h4>${metric.metric_name}</h4>`;
+              metricsContent += `<p><strong>Description:</strong> ${metric.description || 'N/A'}</p>`;
+              metricsContent += `<p><strong>Optimization:</strong> ${metric.lower_is_better ? 'Minimize' : 'Maximize'}</p>`;
+
+              // Create table for dataset values
+              metricsContent += `<table class="metric-table">
+                  <tr>
+                      <th>Dataset</th>
+                      <th>Final Value</th>
+                      <th>Best Value</th>
+                  </tr>`;
+
+              for (const dataPoint of metric.data) {
+                  metricsContent += `<tr>
+                      <td>${dataPoint.dataset_name}</td>
+                      <td>${dataPoint.final_value?.toFixed(4) || 'N/A'}</td>
+                      <td>${dataPoint.best_value?.toFixed(4) || 'N/A'}</td>
+                  </tr>`;
+              }
+
+              metricsContent += `</table></div>`;
+          }
+      } else if (metrics === null) {
+          metricsContent += `<p>No metrics available</p>`;
+      }
+      metricsElm.innerHTML = metricsContent;
+  }
+
+  // Add plots display
+  const plotsElm = document.getElementById("plots");
+  if (plotsElm) {
+      if (plots && plots.length > 0) {
+          let plotsContent = '';
+          plots.forEach(plotPath => {
+              plotsContent += `
+                  <div class="plot-item">
+                      <img src="${plotPath}" alt="Experiment Plot" onerror="console.error('Failed to load plot:', this.src)"/>
+                  </div>`;
+          });
+          plotsElm.innerHTML = plotsContent;
+      } else {
+          plotsElm.innerHTML = '';
+      }
+  }
+
+  // Add error info display
+  const errorElm = document.getElementById("exc_info");
+  if (errorElm) {
+    if (exc_type) {
+      let errorContent = `<h3 style="color: #ff5555">Exception Information:</h3>
+                          <p><strong>Type:</strong> ${exc_type}</p>`;
+
+      if (exc_info) {
+        errorContent += `<p><strong>Details:</strong> <pre>${JSON.stringify(exc_info, null, 2)}</pre></p>`;
+      }
+
+      if (exc_stack) {
+        errorContent += `<p><strong>Stack Trace:</strong> <pre>${exc_stack.join('\n')}</pre></p>`;
+      }
+
+      errorElm.innerHTML = errorContent;
+    } else {
+      errorElm.innerHTML = "No exception info available";
+    }
+  }
+
+  const exec_timeElm = document.getElementById("exec_time");
+  if (exec_timeElm) {
+    let exec_timeContent = '<div id="exec_time"><h3>Execution Time (in seconds):</h3><p>' + exec_time + '</p></div>';
+    exec_timeElm.innerHTML = exec_timeContent;
+  }
+
+  const exec_time_feedbackElm = document.getElementById("exec_time_feedback");
+  if (exec_time_feedbackElm) {
+    let exec_time_feedbackContent = '<div id="exec_time_feedback_content">'
+    exec_time_feedbackContent += '<h3>Execution Time Feedback:</h3>'
+    exec_time_feedbackContent += '<p>' + exec_time_feedback + '</p>'
+    exec_time_feedbackContent += '</div>';
+    exec_time_feedbackElm.innerHTML = exec_time_feedbackContent;
+  }
+
+  const vlm_feedbackElm = document.getElementById("vlm_feedback");
+  if (vlm_feedbackElm) {
+      let vlm_feedbackContent = '';
+
+      if (plot_analyses && plot_analyses.length > 0) {
+          vlm_feedbackContent += `<h3>Plot Analysis:</h3>`;
+          plot_analyses.forEach(analysis => {
+              if (analysis && analysis.plot_path) {  // Add null check
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <h4>Analysis for ${analysis.plot_path.split('/').pop()}</h4>
+                          <p>${analysis.analysis || 'No analysis available'}</p>
+                          <ul class="key-findings">
+                              ${(analysis.key_findings || []).map(finding => `<li>${finding}</li>`).join('')}
+                          </ul>
+                      </div>`;
+              } else {
+                  console.warn('Received invalid plot analysis:', analysis);
+                  vlm_feedbackContent += `
+                      <div class="plot-analysis">
+                          <p>Invalid plot analysis data received</p>
+                      </div>`;
+              }
+          });
+      }
+
+      // Add actionable insights if available
+      if (vlm_feedback_summary && typeof vlm_feedback_summary === 'string') {
+          vlm_feedbackContent += `
+              <div class="vlm_feedback">
+                  <h3>VLM Feedback Summary:</h3>
+                  <p>${vlm_feedback_summary}</p>
+              </div>`;
+      }
+
+      console.log("Datasets successfully tested:", datasets_successfully_tested);
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          vlm_feedbackContent += `
+              <div id="datasets_successfully_tested">
+                  <h3>Datasets Successfully Tested:</h3>
+                  <p>${datasets_successfully_tested.join(', ')}</p>
+              </div>`;
+      }
+
+      if (!vlm_feedbackContent) {
+          vlm_feedbackContent = '<p>No insights available for this experiment.</p>';
+      }
+
+      vlm_feedbackElm.innerHTML = vlm_feedbackContent;
+  }
+
+  const datasets_successfully_testedElm = document.getElementById("datasets_successfully_tested");
+  if (datasets_successfully_testedElm) {
+      let datasets_successfully_testedContent = '';
+      if (datasets_successfully_tested && datasets_successfully_tested.length > 0) {
+          datasets_successfully_testedContent = `<h3>Datasets Successfully Tested:</h3><ul>`;
+          datasets_successfully_tested.forEach(dataset => {
+              datasets_successfully_testedContent += `<li>${dataset}</li>`;
+          });
+          datasets_successfully_testedContent += `</ul>`;
+      } else {
+          datasets_successfully_testedContent = '<p>No datasets tested yet</p>';
+      }
+      datasets_successfully_testedElm.innerHTML = datasets_successfully_testedContent;
+  }
+};
+
+// Initialize with the provided tree data
+const treeStructData = {"edges": [[0, 1], [1, 2]], "layout": [[0.5, 0.0], [0.5, 0.5], [0.5, 1.0]], "plan": ["I will implement a compact synthetic multimodal streaming benchmark that mimics\na vision-language QA setting with image features, caption features, and\nrationale features, so we can test stable test-time adaptation without relying\non a large VLM in this first stage. The base model is a small classifier with a\nfrozen backbone and a lightweight adapter, which matches the intended \u201cadapter-\nonly\u201d online update setting. I will compare three baselines on a shifted test\nstream: frozen inference, entropy-minimization adaptation, and confidence-plus-\ncross-modal-consistency-gated adaptation. The consistency signal will be simple\nbut meaningful: only adapt when the answer prediction agrees with predictions\nfrom auxiliary caption and rationale branches and the confidence is high enough.\nTo reflect stream stability, I will compute standard accuracy and a stability-\nadjusted accuracy that penalizes sharp rolling drops after adaptation steps. The\ncode will train on one synthetic source distribution, evaluate on a target\nstream with distribution shift, log validation loss each epoch, save all\nmetrics/predictions, and produce a visualization of rolling accuracies and\nupdate locations. This gives us a functional baseline that already tests the\ncore hypothesis that consistency-gated updates are safer than naive entropy\nminimization. The setup is intentionally simple and fast, but structured so we\ncan later swap in a real Hugging Face VLM and datasets with minimal changes.", "The main bug is that each dataset split was generated with different latent\nclass prototypes, so train/val/test came from incompatible label semantics; this\nexplains the exploding validation loss. I fix this by creating one shared\nsynthetic world (shared modality prototypes and class structure) and only\napplying a controlled stream shift to the test stream, while also standardizing\nfeatures using train-set statistics instead of per-sample normalization. I also\nmake the consistency update objective actually use cross-modal agreement via KL\nmatching to caption/rationale predictions, which better reflects the research\nidea than entropy-only updates under the consistency gate. The rest of the\nscript keeps the same lightweight setup, logs all required metrics, saves\narrays, and produces visualizations.", "Seed node"], "code": ["import os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport math\nimport time\nimport copy\nimport numpy as np\nimport matplotlib.pyplot as plt\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nfrom torch.utils.data import Dataset, DataLoader\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(7)\nnp.random.seed(7)\n\nexperiment_data = {\n    \"synthetic_vlm_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"test\": []},\n        \"losses\": {\"train\": [], \"val\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"timestamps\": [],\n        \"stream\": {},\n    }\n}\n\n\nclass SyntheticVLMDataset(Dataset):\n    def __init__(self, n=2000, dim=16, num_classes=4, shift=False):\n        self.n = n\n        self.dim = dim\n        self.num_classes = num_classes\n        self.shift = shift\n\n        W_img = np.random.randn(num_classes, dim) * 1.2\n        W_cap = np.random.randn(num_classes, dim) * 0.8\n        W_rat = np.random.randn(num_classes, dim) * 0.8\n        self.data = []\n\n        for i in range(n):\n            y = np.random.randint(0, num_classes)\n            z = np.random.randn(dim)\n\n            img = z + W_img[y] + 0.35 * np.random.randn(dim)\n            cap = 0.7 * z + W_cap[y] + 0.45 * np.random.randn(dim)\n            rat = 0.5 * z + W_rat[y] + 0.5 * np.random.randn(dim)\n\n            if shift:\n                # target stream shift: image shortcut drifts, auxiliaries stay more reliable\n                img = 0.55 * img + 0.9 * np.roll(img, 1) + 0.5 * np.random.randn(dim)\n                if i % 7 == 0:\n                    img = img + np.random.randn(dim) * 1.2  # occasional hard samples\n\n            self.data.append(\n                (\n                    img.astype(np.float32),\n                    cap.astype(np.float32),\n                    rat.astype(np.float32),\n                    y,\n                )\n            )\n\n    def __len__(self):\n        return self.n\n\n    def __getitem__(self, idx):\n        img, cap, rat, y = self.data[idx]\n        return {\n            \"image\": torch.tensor(img, dtype=torch.float32),\n            \"caption\": torch.tensor(cap, dtype=torch.float32),\n            \"rationale\": torch.tensor(rat, dtype=torch.float32),\n            \"label\": torch.tensor(y, dtype=torch.long),\n        }\n\n\nclass SmallVLM(nn.Module):\n    def __init__(self, dim=16, hidden=64, num_classes=4):\n        super().__init__()\n        self.img_backbone = nn.Sequential(\n            nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU()\n        )\n        self.caption_head = nn.Linear(dim, num_classes)\n        self.rationale_head = nn.Linear(dim, num_classes)\n        self.adapter = nn.Sequential(\n            nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, num_classes)\n        )\n\n    def forward(self, image, caption, rationale):\n        h = self.img_backbone(image)\n        logits_main = self.adapter(h)\n        logits_cap = self.caption_head(caption)\n        logits_rat = self.rationale_head(rationale)\n        return logits_main, logits_cap, logits_rat\n\n\ndef normalize_batch(batch):\n    out = {}\n    for k, v in batch.items():\n        if isinstance(v, torch.Tensor):\n            out[k] = v.to(device)\n        else:\n            out[k] = v\n    for key in [\"image\", \"caption\", \"rationale\"]:\n        x = out[key]\n        out[key] = (x - x.mean(dim=-1, keepdim=True)) / (\n            x.std(dim=-1, keepdim=True) + 1e-6\n        )\n    return out\n\n\ndef supervised_loss(logits_main, logits_cap, logits_rat, y):\n    return (\n        F.cross_entropy(logits_main, y)\n        + 0.3 * F.cross_entropy(logits_cap, y)\n        + 0.3 * F.cross_entropy(logits_rat, y)\n    )\n\n\ndef evaluate_loader(model, loader):\n    model.eval()\n    total_loss, total, correct = 0.0, 0, 0\n    preds_all, gt_all = [], []\n    with torch.no_grad():\n        for batch in loader:\n            batch = normalize_batch(batch)\n            lm, lc, lr = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            loss = supervised_loss(lm, lc, lr, batch[\"label\"])\n            pred = lm.argmax(dim=-1)\n            total_loss += loss.item() * batch[\"label\"].size(0)\n            total += batch[\"label\"].size(0)\n            correct += (pred == batch[\"label\"]).sum().item()\n            preds_all.extend(pred.cpu().numpy().tolist())\n            gt_all.extend(batch[\"label\"].cpu().numpy().tolist())\n    return total_loss / total, correct / total, np.array(preds_all), np.array(gt_all)\n\n\ndef entropy_min_loss(logits):\n    p = F.softmax(logits, dim=-1)\n    return -(p * torch.log(p + 1e-8)).sum(dim=-1).mean()\n\n\ndef stream_eval_with_tta(\n    model_init, stream_loader, mode=\"frozen\", lr=5e-3, conf_thresh=0.70\n):\n    model = copy.deepcopy(model_init).to(device)\n    for p in model.img_backbone.parameters():\n        p.requires_grad = False\n    for p in model.caption_head.parameters():\n        p.requires_grad = False\n    for p in model.rationale_head.parameters():\n        p.requires_grad = False\n    for p in model.adapter.parameters():\n        p.requires_grad = True\n    optimizer = torch.optim.Adam(model.adapter.parameters(), lr=lr)\n\n    preds, gts, update_flags, confidences = [], [], [], []\n    losses = []\n    model.eval()\n\n    for step, batch in enumerate(stream_loader):\n        batch = normalize_batch(batch)\n        with torch.no_grad():\n            lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            probs = F.softmax(lm, dim=-1)\n            conf, pred = probs.max(dim=-1)\n            pred_cap = lc.argmax(dim=-1)\n            pred_rat = lrh.argmax(dim=-1)\n            preds.append(pred.item())\n            gts.append(batch[\"label\"].item())\n            confidences.append(conf.item())\n\n        do_update = False\n        if mode == \"entropy\":\n            do_update = True\n        elif mode == \"consistency\":\n            agree = (pred == pred_cap) & (pred == pred_rat)\n            do_update = bool((conf > conf_thresh).item() and agree.item())\n\n        if do_update:\n            model.train()\n            optimizer.zero_grad()\n            lm2, _, _ = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            loss = entropy_min_loss(lm2)\n            loss.backward()\n            optimizer.step()\n            losses.append(loss.item())\n            update_flags.append(1)\n            model.eval()\n        else:\n            losses.append(0.0)\n            update_flags.append(0)\n\n    preds = np.array(preds)\n    gts = np.array(gts)\n    update_flags = np.array(update_flags)\n    confidences = np.array(confidences)\n    acc = float((preds == gts).mean())\n\n    correctness = (preds == gts).astype(np.float32)\n    w = 25\n    rolling = np.array(\n        [correctness[max(0, i - w + 1) : i + 1].mean() for i in range(len(correctness))]\n    )\n    penalties = []\n    for i in np.where(update_flags == 1)[0]:\n        pre = rolling[max(0, i - 1)]\n        post_idx = min(len(rolling) - 1, i + 5)\n        post = rolling[post_idx]\n        penalties.append(max(0.0, pre - post))\n    volatility_penalty = float(np.mean(penalties)) if penalties else 0.0\n    stability_adjusted_acc = acc - 0.5 * volatility_penalty\n\n    return {\n        \"acc\": acc,\n        \"stability_adjusted_acc\": stability_adjusted_acc,\n        \"preds\": preds,\n        \"gts\": gts,\n        \"updates\": update_flags,\n        \"confidences\": confidences,\n        \"rolling_acc\": rolling,\n        \"adapt_loss_mean\": float(np.mean(losses)),\n        \"adapt_freq\": float(update_flags.mean()),\n    }\n\n\n# Data\ntrain_ds = SyntheticVLMDataset(n=2500, shift=False)\nval_ds = SyntheticVLMDataset(n=500, shift=False)\ntest_stream_ds = SyntheticVLMDataset(n=700, shift=True)\n\ntrain_loader = DataLoader(train_ds, batch_size=64, shuffle=True)\nval_loader = DataLoader(val_ds, batch_size=128, shuffle=False)\nstream_loader = DataLoader(test_stream_ds, batch_size=1, shuffle=False)\n\n# Model\nmodel = SmallVLM(dim=16, hidden=64, num_classes=4).to(device)\noptimizer = torch.optim.Adam(model.parameters(), lr=1e-3)\n\n# Train\nepochs = 12\nbest_state = None\nbest_val = float(\"inf\")\n\nfor epoch in range(1, epochs + 1):\n    model.train()\n    total_loss, total, correct = 0.0, 0, 0\n    for batch in train_loader:\n        batch = normalize_batch(batch)\n        optimizer.zero_grad()\n        lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n        loss = supervised_loss(lm, lc, lrh, batch[\"label\"])\n        loss.backward()\n        optimizer.step()\n\n        pred = lm.argmax(dim=-1)\n        total_loss += loss.item() * batch[\"label\"].size(0)\n        total += batch[\"label\"].size(0)\n        correct += (pred == batch[\"label\"]).sum().item()\n\n    train_loss = total_loss / total\n    train_acc = correct / total\n    val_loss, val_acc, _, _ = evaluate_loader(model, val_loader)\n\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n\n    ts = time.time()\n    experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"].append(\n        (epoch, train_loss, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"].append(\n        (epoch, val_loss, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"train\"].append(\n        (epoch, train_acc, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"val\"].append(\n        (epoch, val_acc, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"timestamps\"].append(ts)\n\n    if val_loss < best_val:\n        best_val = val_loss\n        best_state = copy.deepcopy(model.state_dict())\n\nmodel.load_state_dict(best_state)\n\n# Stream evaluation baselines\nfrozen_res = stream_eval_with_tta(model, stream_loader, mode=\"frozen\")\nentropy_res = stream_eval_with_tta(model, stream_loader, mode=\"entropy\")\nconsistency_res = stream_eval_with_tta(model, stream_loader, mode=\"consistency\")\n\nresults = {\"frozen\": frozen_res, \"entropy\": entropy_res, \"consistency\": consistency_res}\n\nfor name, res in results.items():\n    print(\n        f\"{name}: \"\n        f\"acc={res['acc']:.4f}, \"\n        f\"Stream Stability-Adjusted Accuracy={res['stability_adjusted_acc']:.4f}, \"\n        f\"adapt_freq={res['adapt_freq']:.4f}, \"\n        f\"adapt_loss_mean={res['adapt_loss_mean']:.4f}\"\n    )\n\n# Save metrics/predictions\nfor name, res in results.items():\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"test\"].append(\n        {\n            \"name\": name,\n            \"acc\": res[\"acc\"],\n            \"stability_adjusted_acc\": res[\"stability_adjusted_acc\"],\n            \"adapt_freq\": res[\"adapt_freq\"],\n            \"adapt_loss_mean\": res[\"adapt_loss_mean\"],\n            \"timestamp\": time.time(),\n        }\n    )\n\nexperiment_data[\"synthetic_vlm_stream\"][\"predictions\"] = {\n    \"frozen\": frozen_res[\"preds\"],\n    \"entropy\": entropy_res[\"preds\"],\n    \"consistency\": consistency_res[\"preds\"],\n}\nexperiment_data[\"synthetic_vlm_stream\"][\"ground_truth\"] = frozen_res[\"gts\"]\nexperiment_data[\"synthetic_vlm_stream\"][\"stream\"] = {\n    \"frozen_updates\": frozen_res[\"updates\"],\n    \"entropy_updates\": entropy_res[\"updates\"],\n    \"consistency_updates\": consistency_res[\"updates\"],\n    \"frozen_rolling_acc\": frozen_res[\"rolling_acc\"],\n    \"entropy_rolling_acc\": entropy_res[\"rolling_acc\"],\n    \"consistency_rolling_acc\": consistency_res[\"rolling_acc\"],\n}\n\nnp.save(os.path.join(working_dir, \"synthetic_preds_frozen.npy\"), frozen_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"synthetic_preds_entropy.npy\"), entropy_res[\"preds\"])\nnp.save(\n    os.path.join(working_dir, \"synthetic_preds_consistency.npy\"),\n    consistency_res[\"preds\"],\n)\nnp.save(os.path.join(working_dir, \"synthetic_ground_truth.npy\"), frozen_res[\"gts\"])\nnp.save(\n    os.path.join(working_dir, \"synthetic_entropy_updates.npy\"), entropy_res[\"updates\"]\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_consistency_updates.npy\"),\n    consistency_res[\"updates\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_frozen_rolling_acc.npy\"),\n    frozen_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_entropy_rolling_acc.npy\"),\n    entropy_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_consistency_rolling_acc.npy\"),\n    consistency_res[\"rolling_acc\"],\n)\n\n# Visualization\nplt.figure(figsize=(10, 5))\nx = np.arange(len(frozen_res[\"rolling_acc\"]))\nplt.plot(x, frozen_res[\"rolling_acc\"], label=\"Frozen\", linewidth=2)\nplt.plot(x, entropy_res[\"rolling_acc\"], label=\"Entropy TTA\", linewidth=2)\nplt.plot(x, consistency_res[\"rolling_acc\"], label=\"Consistency-Gated TTA\", linewidth=2)\n\nent_u = np.where(entropy_res[\"updates\"] == 1)[0]\ncon_u = np.where(consistency_res[\"updates\"] == 1)[0]\nif len(ent_u) > 0:\n    plt.scatter(\n        ent_u,\n        entropy_res[\"rolling_acc\"][ent_u],\n        s=10,\n        alpha=0.35,\n        label=\"Entropy updates\",\n    )\nif len(con_u) > 0:\n    plt.scatter(\n        con_u,\n        consistency_res[\"rolling_acc\"][con_u],\n        s=14,\n        alpha=0.5,\n        label=\"Consistency updates\",\n    )\n\nplt.xlabel(\"Stream step\")\nplt.ylabel(\"Rolling accuracy\")\nplt.title(\"Synthetic multimodal stream: rolling accuracy and adaptation events\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_stream_rolling_accuracy.png\"), dpi=160\n)\nplt.close()\n\n# Generative-style sample comparison visualization (predicted labels over first 60 samples vs GT)\nplt.figure(figsize=(10, 4))\nn_show = 60\nplt.plot(frozen_res[\"gts\"][:n_show], label=\"Ground Truth\", marker=\"o\")\nplt.plot(entropy_res[\"preds\"][:n_show], label=\"Entropy Pred\", marker=\"x\")\nplt.plot(consistency_res[\"preds\"][:n_show], label=\"Consistency Pred\", marker=\"s\")\nplt.yticks(sorted(np.unique(frozen_res[\"gts\"])))\nplt.xlabel(\"Sample index\")\nplt.ylabel(\"Class\")\nplt.title(\"Sample predictions vs ground truth on stream prefix\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_stream_prediction_samples.png\"), dpi=160\n)\nplt.close()\n\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\n", "import os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport time\nimport copy\nimport numpy as np\nimport matplotlib.pyplot as plt\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nfrom torch.utils.data import Dataset, DataLoader\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(7)\nnp.random.seed(7)\n\nexperiment_data = {\n    \"synthetic_vlm_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"test\": []},\n        \"losses\": {\"train\": [], \"val\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"timestamps\": [],\n        \"stream\": {},\n    }\n}\n\n\nclass SyntheticWorld:\n    def __init__(self, dim=16, num_classes=4, seed=7):\n        rng = np.random.RandomState(seed)\n        self.dim = dim\n        self.num_classes = num_classes\n        self.W_img = rng.randn(num_classes, dim).astype(np.float32) * 1.2\n        self.W_cap = rng.randn(num_classes, dim).astype(np.float32) * 0.8\n        self.W_rat = rng.randn(num_classes, dim).astype(np.float32) * 0.8\n\n\nclass SyntheticVLMDataset(Dataset):\n    def __init__(self, world, n=2000, shift=False, seed=0):\n        self.world = world\n        self.n = n\n        self.shift = shift\n        self.rng = np.random.RandomState(seed)\n        self.data = []\n        dim = world.dim\n        K = world.num_classes\n\n        for i in range(n):\n            y = self.rng.randint(0, K)\n            z = self.rng.randn(dim).astype(np.float32)\n\n            img = z + world.W_img[y] + 0.35 * self.rng.randn(dim).astype(np.float32)\n            cap = (\n                0.7 * z + world.W_cap[y] + 0.45 * self.rng.randn(dim).astype(np.float32)\n            )\n            rat = (\n                0.5 * z + world.W_rat[y] + 0.50 * self.rng.randn(dim).astype(np.float32)\n            )\n\n            if shift:\n                img = (\n                    0.60 * img\n                    + 0.85 * np.roll(img, 1)\n                    + 0.40 * self.rng.randn(dim).astype(np.float32)\n                )\n                if i % 7 == 0:\n                    img = img + 1.0 * self.rng.randn(dim).astype(np.float32)\n\n            self.data.append(\n                (\n                    img.astype(np.float32),\n                    cap.astype(np.float32),\n                    rat.astype(np.float32),\n                    int(y),\n                )\n            )\n\n    def __len__(self):\n        return self.n\n\n    def __getitem__(self, idx):\n        img, cap, rat, y = self.data[idx]\n        return {\n            \"image\": torch.tensor(img, dtype=torch.float32),\n            \"caption\": torch.tensor(cap, dtype=torch.float32),\n            \"rationale\": torch.tensor(rat, dtype=torch.float32),\n            \"label\": torch.tensor(y, dtype=torch.long),\n        }\n\n\nclass FeatureNormalizer:\n    def __init__(self, mean_dict, std_dict):\n        self.mean = {\n            k: torch.tensor(v, dtype=torch.float32).to(device)\n            for k, v in mean_dict.items()\n        }\n        self.std = {\n            k: torch.tensor(v, dtype=torch.float32).to(device)\n            for k, v in std_dict.items()\n        }\n\n    @classmethod\n    def from_dataset(cls, dataset):\n        stats = {}\n        for key in [\"image\", \"caption\", \"rationale\"]:\n            arr = np.stack([sample[key].numpy() for sample in dataset], axis=0)\n            stats[key] = (arr.mean(axis=0), arr.std(axis=0) + 1e-6)\n        mean_dict = {k: v[0] for k, v in stats.items()}\n        std_dict = {k: v[1] for k, v in stats.items()}\n        return cls(mean_dict, std_dict)\n\n    def normalize(self, batch):\n        out = {}\n        for k, v in batch.items():\n            out[k] = v.to(device) if isinstance(v, torch.Tensor) else v\n        for key in [\"image\", \"caption\", \"rationale\"]:\n            out[key] = (out[key] - self.mean[key]) / self.std[key]\n        return out\n\n\nclass SmallVLM(nn.Module):\n    def __init__(self, dim=16, hidden=64, num_classes=4):\n        super().__init__()\n        self.img_backbone = nn.Sequential(\n            nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU()\n        )\n        self.caption_head = nn.Sequential(\n            nn.Linear(dim, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, num_classes)\n        )\n        self.rationale_head = nn.Sequential(\n            nn.Linear(dim, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, num_classes)\n        )\n        self.adapter = nn.Sequential(\n            nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, num_classes)\n        )\n\n    def forward(self, image, caption, rationale):\n        h = self.img_backbone(image)\n        logits_main = self.adapter(h)\n        logits_cap = self.caption_head(caption)\n        logits_rat = self.rationale_head(rationale)\n        return logits_main, logits_cap, logits_rat\n\n\ndef supervised_loss(logits_main, logits_cap, logits_rat, y):\n    return (\n        F.cross_entropy(logits_main, y)\n        + 0.35 * F.cross_entropy(logits_cap, y)\n        + 0.35 * F.cross_entropy(logits_rat, y)\n    )\n\n\ndef evaluate_loader(model, loader, normalizer):\n    model.eval()\n    total_loss, total, correct = 0.0, 0, 0\n    preds_all, gt_all = [], []\n    with torch.no_grad():\n        for batch in loader:\n            batch = {\n                k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n            }\n            batch = normalizer.normalize(batch)\n            lm, lc, lr = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            loss = supervised_loss(lm, lc, lr, batch[\"label\"])\n            pred = lm.argmax(dim=-1)\n            bs = batch[\"label\"].size(0)\n            total_loss += loss.item() * bs\n            total += bs\n            correct += (pred == batch[\"label\"]).sum().item()\n            preds_all.extend(pred.detach().cpu().numpy().tolist())\n            gt_all.extend(batch[\"label\"].detach().cpu().numpy().tolist())\n    return total_loss / total, correct / total, np.array(preds_all), np.array(gt_all)\n\n\ndef entropy_min_loss(logits):\n    p = F.softmax(logits, dim=-1)\n    return -(p * torch.log(p + 1e-8)).sum(dim=-1).mean()\n\n\ndef consistency_alignment_loss(logits_main, logits_cap, logits_rat, temperature=1.0):\n    log_p_main = F.log_softmax(logits_main / temperature, dim=-1)\n    p_cap = F.softmax(logits_cap.detach() / temperature, dim=-1)\n    p_rat = F.softmax(logits_rat.detach() / temperature, dim=-1)\n    target = 0.5 * (p_cap + p_rat)\n    return F.kl_div(log_p_main, target, reduction=\"batchmean\")\n\n\ndef stream_eval_with_tta(\n    model_init, stream_loader, normalizer, mode=\"frozen\", lr=2e-3, conf_thresh=0.70\n):\n    model = copy.deepcopy(model_init).to(device)\n    for p in model.img_backbone.parameters():\n        p.requires_grad = False\n    for p in model.caption_head.parameters():\n        p.requires_grad = False\n    for p in model.rationale_head.parameters():\n        p.requires_grad = False\n    for p in model.adapter.parameters():\n        p.requires_grad = True\n    optimizer = torch.optim.Adam(model.adapter.parameters(), lr=lr)\n\n    preds, gts, update_flags, confidences, losses = [], [], [], [], []\n    model.eval()\n\n    for _, batch in enumerate(stream_loader):\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        batch = normalizer.normalize(batch)\n\n        with torch.no_grad():\n            lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            p_main = F.softmax(lm, dim=-1)\n            p_cap = F.softmax(lc, dim=-1)\n            p_rat = F.softmax(lrh, dim=-1)\n            conf, pred = p_main.max(dim=-1)\n            pred_cap = p_cap.argmax(dim=-1)\n            pred_rat = p_rat.argmax(dim=-1)\n\n            js_like = 0.5 * (\n                F.kl_div(torch.log(p_main + 1e-8), p_cap, reduction=\"batchmean\")\n                + F.kl_div(torch.log(p_main + 1e-8), p_rat, reduction=\"batchmean\")\n            )\n            agree = (pred == pred_cap) & (pred == pred_rat)\n            consistency_score = float(torch.exp(-js_like).item())\n\n            preds.append(int(pred.item()))\n            gts.append(int(batch[\"label\"].item()))\n            confidences.append(float(conf.item()))\n\n        do_update = False\n        if mode == \"entropy\":\n            do_update = True\n        elif mode == \"consistency\":\n            do_update = bool(\n                (conf > conf_thresh).item()\n                and agree.item()\n                and consistency_score > 0.65\n            )\n\n        if do_update:\n            model.train()\n            optimizer.zero_grad()\n            lm2, lc2, lr2 = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            if mode == \"entropy\":\n                loss = entropy_min_loss(lm2)\n            else:\n                loss = consistency_alignment_loss(\n                    lm2, lc2, lr2\n                ) + 0.1 * entropy_min_loss(lm2)\n            loss.backward()\n            torch.nn.utils.clip_grad_norm_(model.adapter.parameters(), 1.0)\n            optimizer.step()\n            losses.append(float(loss.item()))\n            update_flags.append(1)\n            model.eval()\n        else:\n            losses.append(0.0)\n            update_flags.append(0)\n\n    preds = np.array(preds)\n    gts = np.array(gts)\n    update_flags = np.array(update_flags)\n    confidences = np.array(confidences)\n    acc = float((preds == gts).mean())\n\n    correctness = (preds == gts).astype(np.float32)\n    w = 25\n    rolling = np.array(\n        [correctness[max(0, i - w + 1) : i + 1].mean() for i in range(len(correctness))]\n    )\n    penalties = []\n    for i in np.where(update_flags == 1)[0]:\n        pre = rolling[max(0, i - 1)]\n        post = rolling[min(len(rolling) - 1, i + 5)]\n        penalties.append(max(0.0, pre - post))\n    volatility_penalty = float(np.mean(penalties)) if penalties else 0.0\n    stability_adjusted_acc = acc - 0.5 * volatility_penalty\n\n    return {\n        \"acc\": acc,\n        \"stability_adjusted_acc\": stability_adjusted_acc,\n        \"preds\": preds,\n        \"gts\": gts,\n        \"updates\": update_flags,\n        \"confidences\": confidences,\n        \"rolling_acc\": rolling,\n        \"adapt_loss_mean\": float(np.mean(losses)),\n        \"adapt_freq\": float(update_flags.mean()),\n    }\n\n\n# Data\nworld = SyntheticWorld(dim=16, num_classes=4, seed=7)\ntrain_ds = SyntheticVLMDataset(world, n=2500, shift=False, seed=11)\nval_ds = SyntheticVLMDataset(world, n=500, shift=False, seed=13)\ntest_stream_ds = SyntheticVLMDataset(world, n=700, shift=True, seed=17)\n\nnormalizer = FeatureNormalizer.from_dataset(train_ds)\n\ntrain_loader = DataLoader(train_ds, batch_size=64, shuffle=True)\nval_loader = DataLoader(val_ds, batch_size=128, shuffle=False)\nstream_loader = DataLoader(test_stream_ds, batch_size=1, shuffle=False)\n\n# Model\nmodel = SmallVLM(dim=16, hidden=64, num_classes=4).to(device)\noptimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)\n\n# Train\nepochs = 15\nbest_state = None\nbest_val = float(\"inf\")\n\nfor epoch in range(1, epochs + 1):\n    model.train()\n    total_loss, total, correct = 0.0, 0, 0\n\n    for batch in train_loader:\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        batch = normalizer.normalize(batch)\n\n        optimizer.zero_grad()\n        lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n        loss = supervised_loss(lm, lc, lrh, batch[\"label\"])\n        loss.backward()\n        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)\n        optimizer.step()\n\n        pred = lm.argmax(dim=-1)\n        bs = batch[\"label\"].size(0)\n        total_loss += loss.item() * bs\n        total += bs\n        correct += (pred == batch[\"label\"]).sum().item()\n\n    train_loss = total_loss / total\n    train_acc = correct / total\n    val_loss, val_acc, _, _ = evaluate_loader(model, val_loader, normalizer)\n\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n\n    ts = time.time()\n    experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"].append(\n        (epoch, train_loss, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"].append(\n        (epoch, val_loss, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"train\"].append(\n        (epoch, train_acc, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"val\"].append(\n        (epoch, val_acc, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"timestamps\"].append(ts)\n\n    if val_loss < best_val:\n        best_val = val_loss\n        best_state = copy.deepcopy(model.state_dict())\n\nmodel.load_state_dict(best_state)\n\n# Stream evaluation baselines\nfrozen_res = stream_eval_with_tta(model, stream_loader, normalizer, mode=\"frozen\")\nentropy_res = stream_eval_with_tta(model, stream_loader, normalizer, mode=\"entropy\")\nconsistency_res = stream_eval_with_tta(\n    model, stream_loader, normalizer, mode=\"consistency\"\n)\n\nresults = {\"frozen\": frozen_res, \"entropy\": entropy_res, \"consistency\": consistency_res}\n\nfor name, res in results.items():\n    print(\n        f\"{name}: \"\n        f\"acc={res['acc']:.4f}, \"\n        f\"Stream Stability-Adjusted Accuracy={res['stability_adjusted_acc']:.4f}, \"\n        f\"adapt_freq={res['adapt_freq']:.4f}, \"\n        f\"adapt_loss_mean={res['adapt_loss_mean']:.4f}\"\n    )\n\n# Save metrics/predictions\nfor name, res in results.items():\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"test\"].append(\n        {\n            \"name\": name,\n            \"acc\": res[\"acc\"],\n            \"stability_adjusted_acc\": res[\"stability_adjusted_acc\"],\n            \"adapt_freq\": res[\"adapt_freq\"],\n            \"adapt_loss_mean\": res[\"adapt_loss_mean\"],\n            \"timestamp\": time.time(),\n        }\n    )\n\nexperiment_data[\"synthetic_vlm_stream\"][\"predictions\"] = {\n    \"frozen\": frozen_res[\"preds\"],\n    \"entropy\": entropy_res[\"preds\"],\n    \"consistency\": consistency_res[\"preds\"],\n}\nexperiment_data[\"synthetic_vlm_stream\"][\"ground_truth\"] = frozen_res[\"gts\"]\nexperiment_data[\"synthetic_vlm_stream\"][\"stream\"] = {\n    \"frozen_updates\": frozen_res[\"updates\"],\n    \"entropy_updates\": entropy_res[\"updates\"],\n    \"consistency_updates\": consistency_res[\"updates\"],\n    \"frozen_rolling_acc\": frozen_res[\"rolling_acc\"],\n    \"entropy_rolling_acc\": entropy_res[\"rolling_acc\"],\n    \"consistency_rolling_acc\": consistency_res[\"rolling_acc\"],\n    \"frozen_confidences\": frozen_res[\"confidences\"],\n    \"entropy_confidences\": entropy_res[\"confidences\"],\n    \"consistency_confidences\": consistency_res[\"confidences\"],\n}\n\nnp.save(os.path.join(working_dir, \"synthetic_preds_frozen.npy\"), frozen_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"synthetic_preds_entropy.npy\"), entropy_res[\"preds\"])\nnp.save(\n    os.path.join(working_dir, \"synthetic_preds_consistency.npy\"),\n    consistency_res[\"preds\"],\n)\nnp.save(os.path.join(working_dir, \"synthetic_ground_truth.npy\"), frozen_res[\"gts\"])\nnp.save(\n    os.path.join(working_dir, \"synthetic_entropy_updates.npy\"), entropy_res[\"updates\"]\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_consistency_updates.npy\"),\n    consistency_res[\"updates\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_frozen_rolling_acc.npy\"),\n    frozen_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_entropy_rolling_acc.npy\"),\n    entropy_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_consistency_rolling_acc.npy\"),\n    consistency_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_train_losses.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_val_losses.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_train_metrics.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"train\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_val_metrics.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"val\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_test_metrics.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"test\"], dtype=object),\n)\n\n# Visualization 1: rolling accuracy and updates\nplt.figure(figsize=(10, 5))\nx = np.arange(len(frozen_res[\"rolling_acc\"]))\nplt.plot(x, frozen_res[\"rolling_acc\"], label=\"Frozen\", linewidth=2)\nplt.plot(x, entropy_res[\"rolling_acc\"], label=\"Entropy TTA\", linewidth=2)\nplt.plot(x, consistency_res[\"rolling_acc\"], label=\"Consistency-Gated TTA\", linewidth=2)\nent_u = np.where(entropy_res[\"updates\"] == 1)[0]\ncon_u = np.where(consistency_res[\"updates\"] == 1)[0]\nif len(ent_u) > 0:\n    plt.scatter(\n        ent_u,\n        entropy_res[\"rolling_acc\"][ent_u],\n        s=10,\n        alpha=0.35,\n        label=\"Entropy updates\",\n    )\nif len(con_u) > 0:\n    plt.scatter(\n        con_u,\n        consistency_res[\"rolling_acc\"][con_u],\n        s=14,\n        alpha=0.5,\n        label=\"Consistency updates\",\n    )\nplt.xlabel(\"Stream step\")\nplt.ylabel(\"Rolling accuracy\")\nplt.title(\"Synthetic multimodal stream: rolling accuracy and adaptation events\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_stream_rolling_accuracy_fixed.png\"),\n    dpi=160,\n)\nplt.close()\n\n# Visualization 2: predictions vs GT on stream prefix\nplt.figure(figsize=(10, 4))\nn_show = 60\nplt.plot(frozen_res[\"gts\"][:n_show], label=\"Ground Truth\", marker=\"o\")\nplt.plot(entropy_res[\"preds\"][:n_show], label=\"Entropy Pred\", marker=\"x\")\nplt.plot(consistency_res[\"preds\"][:n_show], label=\"Consistency Pred\", marker=\"s\")\nplt.yticks(sorted(np.unique(frozen_res[\"gts\"])))\nplt.xlabel(\"Sample index\")\nplt.ylabel(\"Class\")\nplt.title(\"Sample predictions vs ground truth on stream prefix\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_stream_prediction_samples_fixed.png\"),\n    dpi=160,\n)\nplt.close()\n\n# Visualization 3: training curves\ntrain_curve = np.array(\n    [[x[0], x[1]] for x in experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"]],\n    dtype=float,\n)\nval_curve = np.array(\n    [[x[0], x[1]] for x in experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"]],\n    dtype=float,\n)\nplt.figure(figsize=(9, 4))\nplt.plot(train_curve[:, 0], train_curve[:, 1], label=\"Train loss\")\nplt.plot(val_curve[:, 0], val_curve[:, 1], label=\"Val loss\")\nplt.xlabel(\"Epoch\")\nplt.ylabel(\"Loss\")\nplt.title(\"Synthetic VLM training/validation loss\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_training_curves_fixed.png\"), dpi=160\n)\nplt.close()\n\n# Visualization 4: generative-style sample comparison (predicted label sequences)\nplt.figure(figsize=(10, 4))\nplt.step(\n    np.arange(n_show), frozen_res[\"gts\"][:n_show], where=\"mid\", label=\"Ground Truth\"\n)\nplt.step(\n    np.arange(n_show), frozen_res[\"preds\"][:n_show], where=\"mid\", label=\"Frozen Pred\"\n)\nplt.step(\n    np.arange(n_show),\n    consistency_res[\"preds\"][:n_show],\n    where=\"mid\",\n    label=\"Consistency Pred\",\n)\nplt.xlabel(\"Sample index\")\nplt.ylabel(\"Class\")\nplt.title(\"Generated sample-label sequence comparison on stream prefix\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_generated_sequence_comparison_fixed.png\"),\n    dpi=160,\n)\nplt.close()\n\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\n", "# Set random seed\nimport random\nimport numpy as np\nimport torch\n\nseed = 0\nrandom.seed(seed)\nnp.random.seed(seed)\ntorch.manual_seed(seed)\nif torch.cuda.is_available():\n    torch.cuda.manual_seed(seed)\n\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\nimport time\nimport copy\nimport numpy as np\nimport matplotlib.pyplot as plt\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nfrom torch.utils.data import Dataset, DataLoader\n\ndevice = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\nprint(f\"Using device: {device}\")\n\ntorch.manual_seed(7)\nnp.random.seed(7)\n\nexperiment_data = {\n    \"synthetic_vlm_stream\": {\n        \"metrics\": {\"train\": [], \"val\": [], \"test\": []},\n        \"losses\": {\"train\": [], \"val\": []},\n        \"predictions\": [],\n        \"ground_truth\": [],\n        \"timestamps\": [],\n        \"stream\": {},\n    }\n}\n\n\nclass SyntheticWorld:\n    def __init__(self, dim=16, num_classes=4, seed=7):\n        rng = np.random.RandomState(seed)\n        self.dim = dim\n        self.num_classes = num_classes\n        self.W_img = rng.randn(num_classes, dim).astype(np.float32) * 1.2\n        self.W_cap = rng.randn(num_classes, dim).astype(np.float32) * 0.8\n        self.W_rat = rng.randn(num_classes, dim).astype(np.float32) * 0.8\n\n\nclass SyntheticVLMDataset(Dataset):\n    def __init__(self, world, n=2000, shift=False, seed=0):\n        self.world = world\n        self.n = n\n        self.shift = shift\n        self.rng = np.random.RandomState(seed)\n        self.data = []\n        dim = world.dim\n        K = world.num_classes\n\n        for i in range(n):\n            y = self.rng.randint(0, K)\n            z = self.rng.randn(dim).astype(np.float32)\n\n            img = z + world.W_img[y] + 0.35 * self.rng.randn(dim).astype(np.float32)\n            cap = (\n                0.7 * z + world.W_cap[y] + 0.45 * self.rng.randn(dim).astype(np.float32)\n            )\n            rat = (\n                0.5 * z + world.W_rat[y] + 0.50 * self.rng.randn(dim).astype(np.float32)\n            )\n\n            if shift:\n                img = (\n                    0.60 * img\n                    + 0.85 * np.roll(img, 1)\n                    + 0.40 * self.rng.randn(dim).astype(np.float32)\n                )\n                if i % 7 == 0:\n                    img = img + 1.0 * self.rng.randn(dim).astype(np.float32)\n\n            self.data.append(\n                (\n                    img.astype(np.float32),\n                    cap.astype(np.float32),\n                    rat.astype(np.float32),\n                    int(y),\n                )\n            )\n\n    def __len__(self):\n        return self.n\n\n    def __getitem__(self, idx):\n        img, cap, rat, y = self.data[idx]\n        return {\n            \"image\": torch.tensor(img, dtype=torch.float32),\n            \"caption\": torch.tensor(cap, dtype=torch.float32),\n            \"rationale\": torch.tensor(rat, dtype=torch.float32),\n            \"label\": torch.tensor(y, dtype=torch.long),\n        }\n\n\nclass FeatureNormalizer:\n    def __init__(self, mean_dict, std_dict):\n        self.mean = {\n            k: torch.tensor(v, dtype=torch.float32).to(device)\n            for k, v in mean_dict.items()\n        }\n        self.std = {\n            k: torch.tensor(v, dtype=torch.float32).to(device)\n            for k, v in std_dict.items()\n        }\n\n    @classmethod\n    def from_dataset(cls, dataset):\n        stats = {}\n        for key in [\"image\", \"caption\", \"rationale\"]:\n            arr = np.stack([sample[key].numpy() for sample in dataset], axis=0)\n            stats[key] = (arr.mean(axis=0), arr.std(axis=0) + 1e-6)\n        mean_dict = {k: v[0] for k, v in stats.items()}\n        std_dict = {k: v[1] for k, v in stats.items()}\n        return cls(mean_dict, std_dict)\n\n    def normalize(self, batch):\n        out = {}\n        for k, v in batch.items():\n            out[k] = v.to(device) if isinstance(v, torch.Tensor) else v\n        for key in [\"image\", \"caption\", \"rationale\"]:\n            out[key] = (out[key] - self.mean[key]) / self.std[key]\n        return out\n\n\nclass SmallVLM(nn.Module):\n    def __init__(self, dim=16, hidden=64, num_classes=4):\n        super().__init__()\n        self.img_backbone = nn.Sequential(\n            nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU()\n        )\n        self.caption_head = nn.Sequential(\n            nn.Linear(dim, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, num_classes)\n        )\n        self.rationale_head = nn.Sequential(\n            nn.Linear(dim, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, num_classes)\n        )\n        self.adapter = nn.Sequential(\n            nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, num_classes)\n        )\n\n    def forward(self, image, caption, rationale):\n        h = self.img_backbone(image)\n        logits_main = self.adapter(h)\n        logits_cap = self.caption_head(caption)\n        logits_rat = self.rationale_head(rationale)\n        return logits_main, logits_cap, logits_rat\n\n\ndef supervised_loss(logits_main, logits_cap, logits_rat, y):\n    return (\n        F.cross_entropy(logits_main, y)\n        + 0.35 * F.cross_entropy(logits_cap, y)\n        + 0.35 * F.cross_entropy(logits_rat, y)\n    )\n\n\ndef evaluate_loader(model, loader, normalizer):\n    model.eval()\n    total_loss, total, correct = 0.0, 0, 0\n    preds_all, gt_all = [], []\n    with torch.no_grad():\n        for batch in loader:\n            batch = {\n                k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n            }\n            batch = normalizer.normalize(batch)\n            lm, lc, lr = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            loss = supervised_loss(lm, lc, lr, batch[\"label\"])\n            pred = lm.argmax(dim=-1)\n            bs = batch[\"label\"].size(0)\n            total_loss += loss.item() * bs\n            total += bs\n            correct += (pred == batch[\"label\"]).sum().item()\n            preds_all.extend(pred.detach().cpu().numpy().tolist())\n            gt_all.extend(batch[\"label\"].detach().cpu().numpy().tolist())\n    return total_loss / total, correct / total, np.array(preds_all), np.array(gt_all)\n\n\ndef entropy_min_loss(logits):\n    p = F.softmax(logits, dim=-1)\n    return -(p * torch.log(p + 1e-8)).sum(dim=-1).mean()\n\n\ndef consistency_alignment_loss(logits_main, logits_cap, logits_rat, temperature=1.0):\n    log_p_main = F.log_softmax(logits_main / temperature, dim=-1)\n    p_cap = F.softmax(logits_cap.detach() / temperature, dim=-1)\n    p_rat = F.softmax(logits_rat.detach() / temperature, dim=-1)\n    target = 0.5 * (p_cap + p_rat)\n    return F.kl_div(log_p_main, target, reduction=\"batchmean\")\n\n\ndef stream_eval_with_tta(\n    model_init, stream_loader, normalizer, mode=\"frozen\", lr=2e-3, conf_thresh=0.70\n):\n    model = copy.deepcopy(model_init).to(device)\n    for p in model.img_backbone.parameters():\n        p.requires_grad = False\n    for p in model.caption_head.parameters():\n        p.requires_grad = False\n    for p in model.rationale_head.parameters():\n        p.requires_grad = False\n    for p in model.adapter.parameters():\n        p.requires_grad = True\n    optimizer = torch.optim.Adam(model.adapter.parameters(), lr=lr)\n\n    preds, gts, update_flags, confidences, losses = [], [], [], [], []\n    model.eval()\n\n    for _, batch in enumerate(stream_loader):\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        batch = normalizer.normalize(batch)\n\n        with torch.no_grad():\n            lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            p_main = F.softmax(lm, dim=-1)\n            p_cap = F.softmax(lc, dim=-1)\n            p_rat = F.softmax(lrh, dim=-1)\n            conf, pred = p_main.max(dim=-1)\n            pred_cap = p_cap.argmax(dim=-1)\n            pred_rat = p_rat.argmax(dim=-1)\n\n            js_like = 0.5 * (\n                F.kl_div(torch.log(p_main + 1e-8), p_cap, reduction=\"batchmean\")\n                + F.kl_div(torch.log(p_main + 1e-8), p_rat, reduction=\"batchmean\")\n            )\n            agree = (pred == pred_cap) & (pred == pred_rat)\n            consistency_score = float(torch.exp(-js_like).item())\n\n            preds.append(int(pred.item()))\n            gts.append(int(batch[\"label\"].item()))\n            confidences.append(float(conf.item()))\n\n        do_update = False\n        if mode == \"entropy\":\n            do_update = True\n        elif mode == \"consistency\":\n            do_update = bool(\n                (conf > conf_thresh).item()\n                and agree.item()\n                and consistency_score > 0.65\n            )\n\n        if do_update:\n            model.train()\n            optimizer.zero_grad()\n            lm2, lc2, lr2 = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n            if mode == \"entropy\":\n                loss = entropy_min_loss(lm2)\n            else:\n                loss = consistency_alignment_loss(\n                    lm2, lc2, lr2\n                ) + 0.1 * entropy_min_loss(lm2)\n            loss.backward()\n            torch.nn.utils.clip_grad_norm_(model.adapter.parameters(), 1.0)\n            optimizer.step()\n            losses.append(float(loss.item()))\n            update_flags.append(1)\n            model.eval()\n        else:\n            losses.append(0.0)\n            update_flags.append(0)\n\n    preds = np.array(preds)\n    gts = np.array(gts)\n    update_flags = np.array(update_flags)\n    confidences = np.array(confidences)\n    acc = float((preds == gts).mean())\n\n    correctness = (preds == gts).astype(np.float32)\n    w = 25\n    rolling = np.array(\n        [correctness[max(0, i - w + 1) : i + 1].mean() for i in range(len(correctness))]\n    )\n    penalties = []\n    for i in np.where(update_flags == 1)[0]:\n        pre = rolling[max(0, i - 1)]\n        post = rolling[min(len(rolling) - 1, i + 5)]\n        penalties.append(max(0.0, pre - post))\n    volatility_penalty = float(np.mean(penalties)) if penalties else 0.0\n    stability_adjusted_acc = acc - 0.5 * volatility_penalty\n\n    return {\n        \"acc\": acc,\n        \"stability_adjusted_acc\": stability_adjusted_acc,\n        \"preds\": preds,\n        \"gts\": gts,\n        \"updates\": update_flags,\n        \"confidences\": confidences,\n        \"rolling_acc\": rolling,\n        \"adapt_loss_mean\": float(np.mean(losses)),\n        \"adapt_freq\": float(update_flags.mean()),\n    }\n\n\n# Data\nworld = SyntheticWorld(dim=16, num_classes=4, seed=7)\ntrain_ds = SyntheticVLMDataset(world, n=2500, shift=False, seed=11)\nval_ds = SyntheticVLMDataset(world, n=500, shift=False, seed=13)\ntest_stream_ds = SyntheticVLMDataset(world, n=700, shift=True, seed=17)\n\nnormalizer = FeatureNormalizer.from_dataset(train_ds)\n\ntrain_loader = DataLoader(train_ds, batch_size=64, shuffle=True)\nval_loader = DataLoader(val_ds, batch_size=128, shuffle=False)\nstream_loader = DataLoader(test_stream_ds, batch_size=1, shuffle=False)\n\n# Model\nmodel = SmallVLM(dim=16, hidden=64, num_classes=4).to(device)\noptimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)\n\n# Train\nepochs = 15\nbest_state = None\nbest_val = float(\"inf\")\n\nfor epoch in range(1, epochs + 1):\n    model.train()\n    total_loss, total, correct = 0.0, 0, 0\n\n    for batch in train_loader:\n        batch = {\n            k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)\n        }\n        batch = normalizer.normalize(batch)\n\n        optimizer.zero_grad()\n        lm, lc, lrh = model(batch[\"image\"], batch[\"caption\"], batch[\"rationale\"])\n        loss = supervised_loss(lm, lc, lrh, batch[\"label\"])\n        loss.backward()\n        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)\n        optimizer.step()\n\n        pred = lm.argmax(dim=-1)\n        bs = batch[\"label\"].size(0)\n        total_loss += loss.item() * bs\n        total += bs\n        correct += (pred == batch[\"label\"]).sum().item()\n\n    train_loss = total_loss / total\n    train_acc = correct / total\n    val_loss, val_acc, _, _ = evaluate_loader(model, val_loader, normalizer)\n\n    print(f\"Epoch {epoch}: validation_loss = {val_loss:.4f}\")\n\n    ts = time.time()\n    experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"].append(\n        (epoch, train_loss, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"].append(\n        (epoch, val_loss, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"train\"].append(\n        (epoch, train_acc, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"val\"].append(\n        (epoch, val_acc, ts)\n    )\n    experiment_data[\"synthetic_vlm_stream\"][\"timestamps\"].append(ts)\n\n    if val_loss < best_val:\n        best_val = val_loss\n        best_state = copy.deepcopy(model.state_dict())\n\nmodel.load_state_dict(best_state)\n\n# Stream evaluation baselines\nfrozen_res = stream_eval_with_tta(model, stream_loader, normalizer, mode=\"frozen\")\nentropy_res = stream_eval_with_tta(model, stream_loader, normalizer, mode=\"entropy\")\nconsistency_res = stream_eval_with_tta(\n    model, stream_loader, normalizer, mode=\"consistency\"\n)\n\nresults = {\"frozen\": frozen_res, \"entropy\": entropy_res, \"consistency\": consistency_res}\n\nfor name, res in results.items():\n    print(\n        f\"{name}: \"\n        f\"acc={res['acc']:.4f}, \"\n        f\"Stream Stability-Adjusted Accuracy={res['stability_adjusted_acc']:.4f}, \"\n        f\"adapt_freq={res['adapt_freq']:.4f}, \"\n        f\"adapt_loss_mean={res['adapt_loss_mean']:.4f}\"\n    )\n\n# Save metrics/predictions\nfor name, res in results.items():\n    experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"test\"].append(\n        {\n            \"name\": name,\n            \"acc\": res[\"acc\"],\n            \"stability_adjusted_acc\": res[\"stability_adjusted_acc\"],\n            \"adapt_freq\": res[\"adapt_freq\"],\n            \"adapt_loss_mean\": res[\"adapt_loss_mean\"],\n            \"timestamp\": time.time(),\n        }\n    )\n\nexperiment_data[\"synthetic_vlm_stream\"][\"predictions\"] = {\n    \"frozen\": frozen_res[\"preds\"],\n    \"entropy\": entropy_res[\"preds\"],\n    \"consistency\": consistency_res[\"preds\"],\n}\nexperiment_data[\"synthetic_vlm_stream\"][\"ground_truth\"] = frozen_res[\"gts\"]\nexperiment_data[\"synthetic_vlm_stream\"][\"stream\"] = {\n    \"frozen_updates\": frozen_res[\"updates\"],\n    \"entropy_updates\": entropy_res[\"updates\"],\n    \"consistency_updates\": consistency_res[\"updates\"],\n    \"frozen_rolling_acc\": frozen_res[\"rolling_acc\"],\n    \"entropy_rolling_acc\": entropy_res[\"rolling_acc\"],\n    \"consistency_rolling_acc\": consistency_res[\"rolling_acc\"],\n    \"frozen_confidences\": frozen_res[\"confidences\"],\n    \"entropy_confidences\": entropy_res[\"confidences\"],\n    \"consistency_confidences\": consistency_res[\"confidences\"],\n}\n\nnp.save(os.path.join(working_dir, \"synthetic_preds_frozen.npy\"), frozen_res[\"preds\"])\nnp.save(os.path.join(working_dir, \"synthetic_preds_entropy.npy\"), entropy_res[\"preds\"])\nnp.save(\n    os.path.join(working_dir, \"synthetic_preds_consistency.npy\"),\n    consistency_res[\"preds\"],\n)\nnp.save(os.path.join(working_dir, \"synthetic_ground_truth.npy\"), frozen_res[\"gts\"])\nnp.save(\n    os.path.join(working_dir, \"synthetic_entropy_updates.npy\"), entropy_res[\"updates\"]\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_consistency_updates.npy\"),\n    consistency_res[\"updates\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_frozen_rolling_acc.npy\"),\n    frozen_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_entropy_rolling_acc.npy\"),\n    entropy_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_consistency_rolling_acc.npy\"),\n    consistency_res[\"rolling_acc\"],\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_train_losses.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_val_losses.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_train_metrics.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"train\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_val_metrics.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"val\"], dtype=object),\n)\nnp.save(\n    os.path.join(working_dir, \"synthetic_test_metrics.npy\"),\n    np.array(experiment_data[\"synthetic_vlm_stream\"][\"metrics\"][\"test\"], dtype=object),\n)\n\n# Visualization 1: rolling accuracy and updates\nplt.figure(figsize=(10, 5))\nx = np.arange(len(frozen_res[\"rolling_acc\"]))\nplt.plot(x, frozen_res[\"rolling_acc\"], label=\"Frozen\", linewidth=2)\nplt.plot(x, entropy_res[\"rolling_acc\"], label=\"Entropy TTA\", linewidth=2)\nplt.plot(x, consistency_res[\"rolling_acc\"], label=\"Consistency-Gated TTA\", linewidth=2)\nent_u = np.where(entropy_res[\"updates\"] == 1)[0]\ncon_u = np.where(consistency_res[\"updates\"] == 1)[0]\nif len(ent_u) > 0:\n    plt.scatter(\n        ent_u,\n        entropy_res[\"rolling_acc\"][ent_u],\n        s=10,\n        alpha=0.35,\n        label=\"Entropy updates\",\n    )\nif len(con_u) > 0:\n    plt.scatter(\n        con_u,\n        consistency_res[\"rolling_acc\"][con_u],\n        s=14,\n        alpha=0.5,\n        label=\"Consistency updates\",\n    )\nplt.xlabel(\"Stream step\")\nplt.ylabel(\"Rolling accuracy\")\nplt.title(\"Synthetic multimodal stream: rolling accuracy and adaptation events\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_stream_rolling_accuracy_fixed.png\"),\n    dpi=160,\n)\nplt.close()\n\n# Visualization 2: predictions vs GT on stream prefix\nplt.figure(figsize=(10, 4))\nn_show = 60\nplt.plot(frozen_res[\"gts\"][:n_show], label=\"Ground Truth\", marker=\"o\")\nplt.plot(entropy_res[\"preds\"][:n_show], label=\"Entropy Pred\", marker=\"x\")\nplt.plot(consistency_res[\"preds\"][:n_show], label=\"Consistency Pred\", marker=\"s\")\nplt.yticks(sorted(np.unique(frozen_res[\"gts\"])))\nplt.xlabel(\"Sample index\")\nplt.ylabel(\"Class\")\nplt.title(\"Sample predictions vs ground truth on stream prefix\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_stream_prediction_samples_fixed.png\"),\n    dpi=160,\n)\nplt.close()\n\n# Visualization 3: training curves\ntrain_curve = np.array(\n    [[x[0], x[1]] for x in experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"train\"]],\n    dtype=float,\n)\nval_curve = np.array(\n    [[x[0], x[1]] for x in experiment_data[\"synthetic_vlm_stream\"][\"losses\"][\"val\"]],\n    dtype=float,\n)\nplt.figure(figsize=(9, 4))\nplt.plot(train_curve[:, 0], train_curve[:, 1], label=\"Train loss\")\nplt.plot(val_curve[:, 0], val_curve[:, 1], label=\"Val loss\")\nplt.xlabel(\"Epoch\")\nplt.ylabel(\"Loss\")\nplt.title(\"Synthetic VLM training/validation loss\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_training_curves_fixed.png\"), dpi=160\n)\nplt.close()\n\n# Visualization 4: generative-style sample comparison (predicted label sequences)\nplt.figure(figsize=(10, 4))\nplt.step(\n    np.arange(n_show), frozen_res[\"gts\"][:n_show], where=\"mid\", label=\"Ground Truth\"\n)\nplt.step(\n    np.arange(n_show), frozen_res[\"preds\"][:n_show], where=\"mid\", label=\"Frozen Pred\"\n)\nplt.step(\n    np.arange(n_show),\n    consistency_res[\"preds\"][:n_show],\n    where=\"mid\",\n    label=\"Consistency Pred\",\n)\nplt.xlabel(\"Sample index\")\nplt.ylabel(\"Class\")\nplt.title(\"Generated sample-label sequence comparison on stream prefix\")\nplt.legend()\nplt.tight_layout()\nplt.savefig(\n    os.path.join(working_dir, \"synthetic_vlm_generated_sequence_comparison_fixed.png\"),\n    dpi=160,\n)\nplt.close()\n\nnp.save(os.path.join(working_dir, \"experiment_data.npy\"), experiment_data)\n"], "term_out": ["['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 2.3798', '\\n', 'Epoch\n2: validation_loss = 3.9969', '\\n', 'Epoch 3: validation_loss = 4.5153', '\\n',\n'Epoch 4: validation_loss = 4.7676', '\\n', 'Epoch 5: validation_loss = 4.9723',\n'\\n', 'Epoch 6: validation_loss = 5.1721', '\\n', 'Epoch 7: validation_loss =\n5.3116', '\\n', 'Epoch 8: validation_loss = 5.5175', '\\n', 'Epoch 9:\nvalidation_loss = 5.6474', '\\n', 'Epoch 10: validation_loss = 5.8427', '\\n',\n'Epoch 11: validation_loss = 5.9111', '\\n', 'Epoch 12: validation_loss =\n6.0556', '\\n', 'frozen: acc=0.1929, Stream Stability-Adjusted Accuracy=0.1929,\nadapt_freq=0.0000, adapt_loss_mean=0.0000', '\\n', 'entropy: acc=0.2700, Stream\nStability-Adjusted Accuracy=0.2575, adapt_freq=1.0000, adapt_loss_mean=0.0117',\n'\\n', 'consistency: acc=0.1971, Stream Stability-Adjusted Accuracy=0.1971,\nadapt_freq=0.0014, adapt_loss_mean=0.0012', '\\n', 'Execution time: 2 seconds\nseconds (time limit is 2 hours).']", "['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 1.1056', '\\n', 'Epoch\n2: validation_loss = 0.5178', '\\n', 'Epoch 3: validation_loss = 0.3201', '\\n',\n'Epoch 4: validation_loss = 0.2063', '\\n', 'Epoch 5: validation_loss = 0.1530',\n'\\n', 'Epoch 6: validation_loss = 0.1220', '\\n', 'Epoch 7: validation_loss =\n0.1044', '\\n', 'Epoch 8: validation_loss = 0.0915', '\\n', 'Epoch 9:\nvalidation_loss = 0.0835', '\\n', 'Epoch 10: validation_loss = 0.0771', '\\n',\n'Epoch 11: validation_loss = 0.0728', '\\n', 'Epoch 12: validation_loss =\n0.0697', '\\n', 'Epoch 13: validation_loss = 0.0672', '\\n', 'Epoch 14:\nvalidation_loss = 0.0643', '\\n', 'Epoch 15: validation_loss = 0.0624', '\\n',\n'frozen: acc=0.6829, Stream Stability-Adjusted Accuracy=0.6829,\nadapt_freq=0.0000, adapt_loss_mean=0.0000', '\\n', 'entropy: acc=0.4443, Stream\nStability-Adjusted Accuracy=0.4306, adapt_freq=1.0000, adapt_loss_mean=0.0450',\n'\\n', 'consistency: acc=0.8171, Stream Stability-Adjusted Accuracy=0.8092,\nadapt_freq=0.6514, adapt_loss_mean=0.0603', '\\n', 'Execution time: 4 seconds\nseconds (time limit is 2 hours).']", "['Using device: cuda', '\\n', 'Epoch 1: validation_loss = 1.1056', '\\n', 'Epoch\n2: validation_loss = 0.5178', '\\n', 'Epoch 3: validation_loss = 0.3201', '\\n',\n'Epoch 4: validation_loss = 0.2063', '\\n', 'Epoch 5: validation_loss = 0.1530',\n'\\n', 'Epoch 6: validation_loss = 0.1220', '\\n', 'Epoch 7: validation_loss =\n0.1044', '\\n', 'Epoch 8: validation_loss = 0.0915', '\\n', 'Epoch 9:\nvalidation_loss = 0.0835', '\\n', 'Epoch 10: validation_loss = 0.0771', '\\n',\n'Epoch 11: validation_loss = 0.0728', '\\n', 'Epoch 12: validation_loss =\n0.0697', '\\n', 'Epoch 13: validation_loss = 0.0672', '\\n', 'Epoch 14:\nvalidation_loss = 0.0643', '\\n', 'Epoch 15: validation_loss = 0.0624', '\\n',\n'frozen: acc=0.6829, Stream Stability-Adjusted Accuracy=0.6829,\nadapt_freq=0.0000, adapt_loss_mean=0.0000', '\\n', 'entropy: acc=0.4443, Stream\nStability-Adjusted Accuracy=0.4306, adapt_freq=1.0000, adapt_loss_mean=0.0450',\n'\\n', 'consistency: acc=0.8171, Stream Stability-Adjusted Accuracy=0.8092,\nadapt_freq=0.6514, adapt_loss_mean=0.0603', '\\n', 'Execution time: 3 seconds\nseconds (time limit is 2 hours).']"], "analysis": ["The script executed successfully, but the output strongly indicates a data-\ngeneration bug that invalidates the learning/evaluation signal. Validation loss\nmonotonically worsens from 2.38 to 6.06, frozen accuracy is below chance for 4\nclasses (0.193 < 0.25), and consistency gating almost never triggers (0.14%).\nThe likely root cause is that each dataset split constructs its own independent\nclass-generating weights (W_img, W_cap, W_rat) inside\nSyntheticVLMDataset.__init__, so train/val/test use different label-to-feature\nmappings. This creates an unintended domain mismatch even between train and\nvalidation, making generalization nearly impossible and confounding the test-\ntime adaptation comparison. Fix: generate shared prototype weights once and pass\nthem into all dataset splits, e.g. create W_img/W_cap/W_rat globally (or from\nthe train set) and reuse them for val/test, while applying only the intended\nshift transformation to the test stream. Also consider reporting validation\naccuracy, and for consistency mode, inspect/update the confidence threshold\nafter fixing the split bug because the current threshold may be too strict.", "", ""], "exc_type": [null, null, null], "exc_info": [null, null, null], "exc_stack": [null, null, null], "exp_name": "0-run", "metrics": [{"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Model accuracy on the training set during training.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Model accuracy on the validation set during training.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.196, "best_value": 0.202}]}, {"metric_name": "train loss", "lower_is_better": true, "description": "Model loss on the training set during training.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.212373, "best_value": 0.212373}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Model loss on the validation set during training.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 6.055633, "best_value": 2.379768}]}, {"metric_name": "test accuracy (frozen)", "lower_is_better": false, "description": "Final test accuracy under the frozen evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.192857, "best_value": 0.192857}]}, {"metric_name": "test stability adjusted accuracy (frozen)", "lower_is_better": false, "description": "Final test stability adjusted accuracy under the frozen evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.192857, "best_value": 0.192857}]}, {"metric_name": "test adaptation frequency (frozen)", "lower_is_better": false, "description": "Final test adaptation frequency under the frozen evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "test mean adaptation loss (frozen)", "lower_is_better": true, "description": "Final test mean adaptation loss under the frozen evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "test accuracy (entropy)", "lower_is_better": false, "description": "Final test accuracy under the entropy evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.27, "best_value": 0.27}]}, {"metric_name": "test stability adjusted accuracy (entropy)", "lower_is_better": false, "description": "Final test stability adjusted accuracy under the entropy evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.257534, "best_value": 0.257534}]}, {"metric_name": "test adaptation frequency (entropy)", "lower_is_better": false, "description": "Final test adaptation frequency under the entropy evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "test mean adaptation loss (entropy)", "lower_is_better": true, "description": "Final test mean adaptation loss under the entropy evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.011743, "best_value": 0.011743}]}, {"metric_name": "test accuracy (consistency)", "lower_is_better": false, "description": "Final test accuracy under the consistency evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.197143, "best_value": 0.197143}]}, {"metric_name": "test stability adjusted accuracy (consistency)", "lower_is_better": false, "description": "Final test stability adjusted accuracy under the consistency evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.197143, "best_value": 0.197143}]}, {"metric_name": "test adaptation frequency (consistency)", "lower_is_better": false, "description": "Final test adaptation frequency under the consistency evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.001429, "best_value": 0.001429}]}, {"metric_name": "test mean adaptation loss (consistency)", "lower_is_better": true, "description": "Final test mean adaptation loss under the consistency evaluation setting.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.001204, "best_value": 0.001204}]}]}, {"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Model accuracy on the training set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Model accuracy on the validation set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "train loss", "lower_is_better": true, "description": "Loss on the training set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.059357, "best_value": 0.059357}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Loss on the validation set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.062449, "best_value": 0.062449}]}, {"metric_name": "test accuracy (frozen)", "lower_is_better": false, "description": "Test accuracy using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.682857, "best_value": 0.682857}]}, {"metric_name": "test stability-adjusted accuracy (frozen)", "lower_is_better": false, "description": "Stability-adjusted test accuracy using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.682857, "best_value": 0.682857}]}, {"metric_name": "test adaptation frequency (frozen)", "lower_is_better": true, "description": "Frequency of adaptation on the test set using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "test adaptation loss mean (frozen)", "lower_is_better": true, "description": "Mean adaptation loss on the test set using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "test accuracy (entropy)", "lower_is_better": false, "description": "Test accuracy using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.444286, "best_value": 0.444286}]}, {"metric_name": "test stability-adjusted accuracy (entropy)", "lower_is_better": false, "description": "Stability-adjusted test accuracy using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.430584, "best_value": 0.430584}]}, {"metric_name": "test adaptation frequency (entropy)", "lower_is_better": true, "description": "Frequency of adaptation on the test set using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "test adaptation loss mean (entropy)", "lower_is_better": true, "description": "Mean adaptation loss on the test set using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.045018, "best_value": 0.045018}]}, {"metric_name": "test accuracy (consistency)", "lower_is_better": false, "description": "Test accuracy using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.817143, "best_value": 0.817143}]}, {"metric_name": "test stability-adjusted accuracy (consistency)", "lower_is_better": false, "description": "Stability-adjusted test accuracy using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.809172, "best_value": 0.809172}]}, {"metric_name": "test adaptation frequency (consistency)", "lower_is_better": true, "description": "Frequency of adaptation on the test set using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.651429, "best_value": 0.651429}]}, {"metric_name": "test adaptation loss mean (consistency)", "lower_is_better": true, "description": "Mean adaptation loss on the test set using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.06029, "best_value": 0.06029}]}]}, {"metric_names": [{"metric_name": "train accuracy", "lower_is_better": false, "description": "Model accuracy on the training set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "validation accuracy", "lower_is_better": false, "description": "Model accuracy on the validation set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "train loss", "lower_is_better": true, "description": "Model loss on the training set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.059357, "best_value": 0.059357}]}, {"metric_name": "validation loss", "lower_is_better": true, "description": "Model loss on the validation set.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.062449, "best_value": 0.062449}]}, {"metric_name": "test accuracy (frozen)", "lower_is_better": false, "description": "Test accuracy using the frozen adaptation strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.682857, "best_value": 0.682857}]}, {"metric_name": "test stability-adjusted accuracy (frozen)", "lower_is_better": false, "description": "Test stability-adjusted accuracy using the frozen adaptation strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.682857, "best_value": 0.682857}]}, {"metric_name": "test adaptation frequency (frozen)", "lower_is_better": true, "description": "Frequency of test-time adaptation using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "test adaptation loss mean (frozen)", "lower_is_better": true, "description": "Mean adaptation loss on the test set using the frozen strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.0, "best_value": 0.0}]}, {"metric_name": "test accuracy (entropy)", "lower_is_better": false, "description": "Test accuracy using the entropy adaptation strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.444286, "best_value": 0.444286}]}, {"metric_name": "test stability-adjusted accuracy (entropy)", "lower_is_better": false, "description": "Test stability-adjusted accuracy using the entropy adaptation strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.430584, "best_value": 0.430584}]}, {"metric_name": "test adaptation frequency (entropy)", "lower_is_better": true, "description": "Frequency of test-time adaptation using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 1.0, "best_value": 1.0}]}, {"metric_name": "test adaptation loss mean (entropy)", "lower_is_better": true, "description": "Mean adaptation loss on the test set using the entropy strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.045018, "best_value": 0.045018}]}, {"metric_name": "test accuracy (consistency)", "lower_is_better": false, "description": "Test accuracy using the consistency adaptation strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.817143, "best_value": 0.817143}]}, {"metric_name": "test stability-adjusted accuracy (consistency)", "lower_is_better": false, "description": "Test stability-adjusted accuracy using the consistency adaptation strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.809172, "best_value": 0.809172}]}, {"metric_name": "test adaptation frequency (consistency)", "lower_is_better": true, "description": "Frequency of test-time adaptation using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.651429, "best_value": 0.651429}]}, {"metric_name": "test adaptation loss mean (consistency)", "lower_is_better": true, "description": "Mean adaptation loss on the test set using the consistency strategy.", "data": [{"dataset_name": "synthetic_vlm_stream", "final_value": 0.06029, "best_value": 0.06029}]}]}], "is_best_node": [false, true, false], "plots": [[], ["../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy_fixed.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples_fixed.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_training_curves_fixed.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_generated_sequence_comparison_fixed.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_loss.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_accuracy.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_rolling_accuracy_updates.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_vs_ground_truth_prefix.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_confidence_curves.png", "../../logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_final_test_metrics_bar.png"], ["../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_rolling_accuracy_fixed.png", "../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_prediction_samples_fixed.png", "../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_training_curves_fixed.png", "../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_generated_sequence_comparison_fixed.png", "../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_training_validation_loss.png", "../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_training_validation_accuracy.png", "../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_stream_rolling_accuracy_updates.png", "../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_prediction_vs_ground_truth_prefix.png", "../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_stream_confidence_curves.png", "../../logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_final_test_metrics_bar.png"]], "plot_paths": [[], ["experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_training_curves_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_generated_sequence_comparison_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_loss.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_accuracy.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_rolling_accuracy_updates.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_vs_ground_truth_prefix.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_confidence_curves.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_final_test_metrics_bar.png"], ["experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_rolling_accuracy_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_prediction_samples_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_training_curves_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_generated_sequence_comparison_fixed.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_training_validation_loss.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_training_validation_accuracy.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_stream_rolling_accuracy_updates.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_prediction_vs_ground_truth_prefix.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_stream_confidence_curves.png", "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_final_test_metrics_bar.png"]], "plot_analyses": [[], [{"analysis": "Loss decreases smoothly and monotonically for both training and validation, from roughly 1.9/1.1 to about 0.06 by the end. The gap between training and validation is small throughout and nearly vanishes after mid training, which indicates optimization is stable and there is no visible overfitting on this synthetic task. Convergence is very fast, with most gains achieved in the first 5\u20137 epochs, implying the dataset or objective is simple. For an initial implementation this is good evidence that the basic training pipeline works, but it also suggests the task may be too easy to stress-test adaptation methods.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy.png"}, {"analysis": "This reproduces the same train-versus-validation loss pattern: rapid early drop, then a long flat tail near very low loss. The near overlap of curves after a few epochs supports that the model generalizes well on the synthetic split. Because the curve shape is almost identical to the previous loss plot, it likely serves as a duplicate sanity-check figure rather than adding new evidence. The key takeaway remains that the base model/adapter can be trained reliably, but this alone does not validate test-time learning behavior.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples.png"}, {"analysis": "Training and validation accuracy rise to essentially 100% within about 3\u20135 epochs and then saturate. Validation is even slightly above training at the start, which is plausible on a small or easy synthetic split but also hints that regularization/noise in training may exceed validation difficulty. The complete saturation means the offline task is solved almost perfectly, so downstream stream experiments are probably probing distribution shift or online instability rather than standard generalization. For paper-quality evidence, later experiments should use harder datasets where accuracy does not ceiling this quickly.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_rolling_accuracy_fixed.png"}, {"analysis": "Rolling stream accuracy shows a strong separation among methods. Consistency-gated TTA stays mostly in the 0.7\u20131.0 range and trends upward over the stream, often reaching very high accuracy. Frozen inference is middling, oscillating around roughly 0.5\u20130.8. Entropy TTA is clearly unstable: it frequently drops far below frozen, with severe collapses around several regions of the stream. The adaptation event markers indicate both adaptive methods update often, but only the consistency-gated updates appear beneficial. This is the clearest plot supporting the central hypothesis: naive entropy minimization can reinforce errors, while gating with a stronger consistency signal stabilizes online adaptation.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_samples_fixed.png"}, {"analysis": "This is effectively the same stream-performance result and reinforces the same conclusion. Consistency-gated adaptation remains consistently above frozen and substantially above entropy-based adaptation across most stream steps. Entropy adaptation again shows repeated degradation episodes rather than recovery, suggesting harmful updates accumulate or are triggered on ambiguous samples. The duplication is not harmful, but future result sets would be stronger if this slot were used for complementary diagnostics such as update frequency, latency, or cumulative regret.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_training_curves_fixed.png"}, {"analysis": "Prediction confidence is near 1.0 for almost all stream steps for all three methods, with only intermittent dips. Despite this uniformly high confidence, the rolling-accuracy plots show large performance differences, especially the poor behavior of entropy TTA. That mismatch is important: confidence is badly calibrated in this synthetic setup and cannot by itself serve as a safe adaptation trigger. This directly motivates the paper idea, because cross-modal consistency appears more informative than raw confidence or low entropy when deciding whether to update.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_generated_sequence_comparison_fixed.png"}, {"analysis": "The aggregate metric bars summarize the stream results cleanly. Consistency has the best final accuracy and best stability-adjusted accuracy, both around the low 0.8s. Frozen is second, around the high 0.6s. Entropy is much worse, around the mid 0.4s, and its stability-adjusted score is slightly lower than its raw accuracy, reflecting volatility. The small gap between raw and stability-adjusted accuracy for consistency suggests not only better average performance but also smoother behavior. This is strong preliminary evidence in favor of the proposed gating mechanism on the synthetic benchmark.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_loss.png"}, {"analysis": "The sample-level sequence comparison on a stream prefix shows consistency-based predictions visually track the ground-truth class sequence more often than the frozen predictions. Frozen predictions appear to spend longer stretches on incorrect classes or abrupt mismatches, while consistency predictions align more frequently with the target transitions. Because this is a qualitative prefix view, it is useful for illustrating behavior but should not be over-interpreted quantitatively. It does, however, match the aggregate trend that consistency gating improves local prediction fidelity.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_training_validation_accuracy.png"}, {"analysis": "This prediction comparison plot shows ground truth alongside frozen, entropy, and consistency predictions over a stream prefix. Consistency predictions overlap the ground truth more often than entropy predictions, while entropy appears to make more persistent mismatches. Frozen is intermediate. The figure qualitatively supports the stream-accuracy results by showing that consistency gating reduces error bursts. Since the lines are visually dense and class labels are discrete, a confusion matrix or per-class accuracy table would communicate failure modes more clearly in later experiments.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_stream_rolling_accuracy_updates.png"}, {"analysis": "This prefix comparison between entropy and consistency predictions against ground truth again suggests consistency is closer to the true label sequence, while entropy exhibits more deviations and abrupt incorrect jumps. The qualitative contrast is useful because it makes the instability of entropy adaptation visible at the sample level. Still, the plot is crowded and limited to a short prefix, so it should be treated as illustrative rather than decisive. For the next stage, it would be valuable to annotate actual adaptation points and whether each update helped or hurt on subsequent samples.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_edb7bd42f4b14679a8cd4a5e69fb1544_proc_7608/synthetic_vlm_stream_prediction_vs_ground_truth_prefix.png"}], [{"analysis": "The rolling-accuracy stream plot provides the clearest evidence for the main hypothesis in this preliminary synthetic setup. Consistency-gated TTA stays well above both frozen inference and entropy-only TTA for most of the stream, often operating around roughly 0.75\u20130.95 and occasionally reaching 1.0. Frozen inference is middling and oscillatory, mostly around 0.5\u20130.8. Entropy-only TTA is the weakest method after the early stream, with several severe collapses, including dips near 0.1\u20130.2 around the first third of the stream and repeated low-accuracy regions later. This is strong qualitative support for the claim that naive entropy minimization can destabilize online adaptation. The adaptation markers also suggest updates are frequent, but the plot does not cleanly quantify whether consistency gating reduces update frequency or merely makes updates safer. For the paper direction, the key takeaway is that the synthetic implementation already reproduces the intended failure mode: entropy adaptation can become harmful, while cross-modal consistency gating appears to stabilize learning.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_rolling_accuracy_fixed.png"}, {"analysis": "The sample-prediction comparison on a stream prefix is useful as a qualitative sanity check, but it is visually noisy. Entropy predictions often disagree with ground truth and appear to jump between classes in a way that matches the poor rolling-accuracy behavior seen elsewhere. Consistency predictions also fluctuate substantially, but they align with the ground-truth sequence more often than entropy predictions over the shown prefix. Because all classes are plotted as connected lines, the figure emphasizes transitions rather than correctness and can exaggerate apparent volatility. The main scientific value here is limited but supportive: the consistency-gated method appears less prone to persistent wrong-class runs than entropy-only adaptation. For future iterations, replacing connected line plots with per-sample correctness indicators or confusion summaries would make the failure modes much easier to interpret.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_prediction_samples_fixed.png"}, {"analysis": "The train/validation loss curves show smooth, monotonic optimization with both losses rapidly decreasing and nearly converging by the end. Validation loss is even slightly below training loss throughout much of training, which is plausible under regularization or an easy validation split, but in this context mainly indicates the synthetic supervised task is very easy. There is no sign of overfitting, optimization instability, or train/validation divergence. This is good for implementation sanity, but it also means these curves do not strongly support the central test-time-learning claim. Instead, they suggest the base model or lightweight classifier can fit the synthetic dataset almost perfectly offline, so the interesting part of the study must come from the online stream dynamics rather than standard generalization difficulty.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_training_curves_fixed.png"}, {"analysis": "The generated sample-label sequence comparison between ground truth, frozen predictions, and consistency predictions again suggests the consistency-gated method often tracks the target sequence better than the frozen baseline on the shown prefix, but the figure remains difficult to read because of dense class switching and connected step lines. There are visible stretches where consistency matches the ground truth while frozen deviates, which is directionally aligned with the stream-level gains. However, the qualitative nature of the plot makes it hard to assess how often this happens or whether gains are concentrated in specific classes. The result is best interpreted as a debugging visualization confirming that the consistency method is not trivially broken and can improve individual predictions, rather than as strong evidence on its own.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_generated_sequence_comparison_fixed.png"}, {"analysis": "This train-vs-validation loss plot is effectively a duplicate of the earlier loss figure, with the same pattern: rapid early loss reduction and near-convergence to a very low value by later epochs. The duplication does not add new scientific information. The substantive interpretation remains that the synthetic dataset is easy and the offline model trains cleanly. For a conference-quality story, these plots should probably be condensed to one panel or moved to an appendix, since they mainly establish implementation correctness rather than the novelty claim about stable test-time adaptation.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_training_validation_loss.png"}, {"analysis": "The train-vs-validation accuracy plot shows both curves reaching essentially 100% by around epochs 3\u20134 and then staying saturated. This is a strong indication that the offline task is too easy to reveal meaningful differences in representation quality or generalization. As an implementation milestone, this is reassuring: the training pipeline works and the model can learn the synthetic mapping. But for the research hypothesis, saturation is a warning sign. If the pretraining or source-task accuracy is perfect, then the stream experiment may be dominated by synthetic drift or adaptation mechanics rather than realistic multimodal ambiguity. The next stage should increase difficulty, introduce controlled distribution shift, and report whether consistency gating still helps when the base model is imperfect in a more realistic way.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_training_validation_accuracy.png"}, {"analysis": "This rolling-accuracy plot appears to repeat the earlier stream-performance figure and reinforces the same conclusion. Consistency-gated adaptation is consistently strongest, frozen is moderate, and entropy-only adaptation is unstable and often substantially worse than doing nothing. The repeated severe underperformance of entropy-only adaptation is important because it directly validates the paper motivation that confidence-seeking updates can reinforce spurious shortcuts. The consistency-gated curve not only improves average accuracy but also appears smoother and less collapse-prone, which is exactly the kind of stability argument the paper wants. To strengthen this result, future versions should add explicit summary statistics such as mean rolling accuracy, variance over time, number of collapses, and adaptation count per method.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_stream_rolling_accuracy_updates.png"}, {"analysis": "The multi-method prediction comparison over a stream prefix is one of the more directly relevant qualitative plots because it places frozen, entropy, and consistency predictions against ground truth in a single panel. Frozen predictions often coincide with ground truth but still show noticeable errors. Entropy predictions appear especially erratic, with many mismatches and abrupt switches, consistent with the poor stream-level performance. Consistency predictions visually overlap ground truth more often than the other adaptive method and in many places seem comparable to or better than frozen. This supports the claim that the consistency signal is acting as a useful filter on self-training updates. Still, the plot would be much stronger if accompanied by per-class accuracy or a correctness raster, since line crossings make exact comparison difficult.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_prediction_vs_ground_truth_prefix.png"}, {"analysis": "The confidence-over-stream plot is highly informative for the instability narrative. All methods are often very confident, but entropy-only TTA appears to spend much of the stream at or near confidence 1.0 despite its poor rolling accuracy elsewhere. That pattern is exactly what one would expect from an overconfidence-inducing self-training objective such as entropy minimization. Frozen confidence is also high but shows more dips. Consistency-gated confidence remains high as well, yet unlike entropy-only adaptation it coincides with strong accuracy in the stream plots, suggesting its confidence is better calibrated or at least less harmful. This figure is one of the strongest pieces of evidence that the method is addressing the right failure mode: not low confidence, but confidently wrong adaptation. A next step would be to quantify calibration with ECE/Brier score and to plot confidence conditioned on correctness.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_stream_confidence_curves.png"}, {"analysis": "The final test-metrics bar chart summarizes the main result cleanly. Consistency-gated adaptation is best on both raw accuracy and stability-adjusted accuracy, slightly above frozen inference and far above entropy-only adaptation. Frozen remains reasonably strong, which is important because it means the adaptive method must beat a competent no-update baseline rather than only a weak comparator. Entropy-only adaptation is dramatically worse, confirming that naive adaptation can be harmful. The small gap between accuracy and stability-adjusted accuracy for consistency suggests its gains are not coming from a few spikes but are sustained over the stream. This is the most concise evidence in favor of the hypothesis, though because the experiment is synthetic, the result should be framed as a proof of concept rather than a definitive validation of cross-modal consistency in real open VLMs.", "plot_path": "experiments/2026-03-29_01-17-34_cross_modal_consistency_ttl_attempt_0/logs/0-run/experiment_results/experiment_2da32678172c4e059a9d55149d66a304_proc_7608/synthetic_vlm_stream_final_test_metrics_bar.png"}]], "vlm_feedback_summary": ["[]", "The uploaded figures show a synthetic preliminary implementation with duplicated\ntraining/stream plots. Supervised training converges extremely quickly to near-\nzero loss and near-perfect accuracy, suggesting the toy task is easy or\npotentially too clean. In stream evaluation, consistency-gated adaptation\nclearly outperforms both frozen inference and entropy-based test-time\nadaptation, while entropy adaptation is unstable and often worse than frozen.\nConfidence traces remain near-saturated for all methods, indicating confidence\nalone is not a reliable stability signal. Final aggregate bars and sample-level\nprediction plots are consistent with the claim that consistency gating is safer\nthan entropy minimization in this synthetic setup, but the setup appears too\nsimple for strong scientific conclusions.", "The uploaded figures are valid and mostly consistent with a synthetic proof-of-\nconcept story: consistency-gated test-time adaptation clearly outperforms frozen\ninference and especially entropy-only adaptation on stream accuracy and final\nmetrics, while standard supervised training curves saturate almost perfectly and\ntherefore are not very informative for the core hypothesis. Several plots are\nduplicated or partially redundant, and the confidence plot suggests entropy-\nbased adaptation becomes highly confident despite poor accuracy, supporting the\ninstability motivation. Prediction-sequence plots qualitatively suggest\nconsistency-gated outputs track ground truth better than entropy-only, but the\nsynthetic nature and near-perfect offline training indicate the setup is still\npreliminary and may be too easy or too stylized for strong scientific claims."], "exec_time": [2.7571420669555664, 4.049548625946045, 3.906015396118164], "exec_time_feedback": ["", "", ""], "datasets_successfully_tested": [[], ["[]"], [""]], "plot_code": [null, "import matplotlib.pyplot as plt\nimport numpy as np\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\ntry:\n    experiment_data = np.load(\n        os.path.join(working_dir, \"experiment_data.npy\"), allow_pickle=True\n    ).item()\nexcept Exception as e:\n    print(f\"Error loading experiment data: {e}\")\n    experiment_data = {}\n\ndataset_name = next(iter(experiment_data.keys()), None)\nds = experiment_data.get(dataset_name, {}) if dataset_name else {}\nlosses = ds.get(\"losses\", {})\nmetrics = ds.get(\"metrics\", {})\nstream = ds.get(\"stream\", {})\npreds = ds.get(\"predictions\", {})\ngts = np.array(ds.get(\"ground_truth\", []))\n\n\ndef to_epoch_value(arr):\n    out = []\n    for x in arr:\n        try:\n            out.append((float(x[0]), float(x[1])))\n        except Exception:\n            pass\n    return np.array(out) if out else np.empty((0, 2))\n\n\ntrain_loss = to_epoch_value(losses.get(\"train\", []))\nval_loss = to_epoch_value(losses.get(\"val\", []))\ntrain_acc = to_epoch_value(metrics.get(\"train\", []))\nval_acc = to_epoch_value(metrics.get(\"val\", []))\ntest_metrics = metrics.get(\"test\", [])\n\nprint(f\"dataset={dataset_name}\")\nif len(train_loss):\n    print(f\"final_train_loss={train_loss[-1,1]:.4f}\")\nif len(val_loss):\n    print(f\"final_val_loss={val_loss[-1,1]:.4f}\")\nif len(train_acc):\n    print(f\"final_train_acc={train_acc[-1,1]:.4f}\")\nif len(val_acc):\n    print(f\"final_val_acc={val_acc[-1,1]:.4f}\")\nfor m in test_metrics:\n    if isinstance(m, dict):\n        print(\n            f\"{m.get('name','unknown')}: \"\n            f\"acc={m.get('acc', np.nan):.4f}, \"\n            f\"stability_adjusted_acc={m.get('stability_adjusted_acc', np.nan):.4f}, \"\n            f\"adapt_freq={m.get('adapt_freq', np.nan):.4f}, \"\n            f\"adapt_loss_mean={m.get('adapt_loss_mean', np.nan):.4f}\"\n        )\n\ntry:\n    if len(train_loss) and len(val_loss):\n        plt.figure(figsize=(8, 4))\n        plt.plot(train_loss[:, 0], train_loss[:, 1], label=\"Train loss\")\n        plt.plot(val_loss[:, 0], val_loss[:, 1], label=\"Validation loss\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Loss\")\n        plt.title(f\"{dataset_name} dataset: Training curves\\nTrain vs Validation Loss\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset_name}_training_validation_loss.png\"),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot1: {e}\")\n    plt.close()\n\ntry:\n    if len(train_acc) and len(val_acc):\n        plt.figure(figsize=(8, 4))\n        plt.plot(train_acc[:, 0], train_acc[:, 1], label=\"Train accuracy\")\n        plt.plot(val_acc[:, 0], val_acc[:, 1], label=\"Validation accuracy\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Accuracy\")\n        plt.title(\n            f\"{dataset_name} dataset: Training curves\\nTrain vs Validation Accuracy\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset_name}_training_validation_accuracy.png\"\n            ),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot2: {e}\")\n    plt.close()\n\ntry:\n    fr = np.array(stream.get(\"frozen_rolling_acc\", []))\n    en = np.array(stream.get(\"entropy_rolling_acc\", []))\n    co = np.array(stream.get(\"consistency_rolling_acc\", []))\n    eu = np.array(stream.get(\"entropy_updates\", []))\n    cu = np.array(stream.get(\"consistency_updates\", []))\n    if len(fr) or len(en) or len(co):\n        plt.figure(figsize=(10, 5))\n        if len(fr):\n            plt.plot(np.arange(len(fr)), fr, label=\"Frozen\", linewidth=2)\n        if len(en):\n            plt.plot(np.arange(len(en)), en, label=\"Entropy TTA\", linewidth=2)\n        if len(co):\n            plt.plot(np.arange(len(co)), co, label=\"Consistency-Gated TTA\", linewidth=2)\n        if len(en) and len(eu):\n            idx = np.where(eu == 1)[0]\n            if len(idx):\n                plt.scatter(idx, en[idx], s=10, alpha=0.4, label=\"Entropy updates\")\n        if len(co) and len(cu):\n            idx = np.where(cu == 1)[0]\n            if len(idx):\n                plt.scatter(idx, co[idx], s=12, alpha=0.5, label=\"Consistency updates\")\n        plt.xlabel(\"Stream step\")\n        plt.ylabel(\"Rolling accuracy\")\n        plt.title(\n            f\"{dataset_name} dataset: Stream performance\\nRolling Accuracy with Adaptation Events\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset_name}_stream_rolling_accuracy_updates.png\"\n            ),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot3: {e}\")\n    plt.close()\n\ntry:\n    n_show = (\n        min(60, len(gts), *(len(np.array(v)) for v in preds.values()))\n        if len(preds)\n        else min(60, len(gts))\n    )\n    if n_show > 0:\n        plt.figure(figsize=(10, 4))\n        plt.plot(np.arange(n_show), gts[:n_show], label=\"Ground Truth\", marker=\"o\")\n        for name in [\"frozen\", \"entropy\", \"consistency\"]:\n            arr = np.array(preds.get(name, []))\n            if len(arr) >= n_show:\n                plt.plot(\n                    np.arange(n_show),\n                    arr[:n_show],\n                    label=f\"{name.title()} Pred\",\n                    marker=\"x\" if name == \"entropy\" else None,\n                )\n        plt.xlabel(\"Sample index\")\n        plt.ylabel(\"Class\")\n        plt.title(\n            f\"{dataset_name} dataset: Prediction comparison\\nLeft: Ground Truth, Right: Generated Samples over Stream Prefix\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset_name}_prediction_vs_ground_truth_prefix.png\"\n            ),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot4: {e}\")\n    plt.close()\n\ntry:\n    fc = np.array(stream.get(\"frozen_confidences\", []))\n    ec = np.array(stream.get(\"entropy_confidences\", []))\n    cc = np.array(stream.get(\"consistency_confidences\", []))\n    if len(fc) or len(ec) or len(cc):\n        plt.figure(figsize=(10, 4))\n        if len(fc):\n            plt.plot(np.arange(len(fc)), fc, label=\"Frozen confidence\")\n        if len(ec):\n            plt.plot(np.arange(len(ec)), ec, label=\"Entropy TTA confidence\")\n        if len(cc):\n            plt.plot(np.arange(len(cc)), cc, label=\"Consistency-Gated TTA confidence\")\n        plt.xlabel(\"Stream step\")\n        plt.ylabel(\"Confidence\")\n        plt.title(\n            f\"{dataset_name} dataset: Stream confidence\\nPrediction Confidence Across Stream Steps\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset_name}_stream_confidence_curves.png\"),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot5: {e}\")\n    plt.close()\n\ntry:\n    if test_metrics:\n        names = [m.get(\"name\", f\"model_{i}\") for i, m in enumerate(test_metrics)]\n        accs = [m.get(\"acc\", np.nan) for m in test_metrics]\n        stabs = [m.get(\"stability_adjusted_acc\", np.nan) for m in test_metrics]\n        x = np.arange(len(names))\n        plt.figure(figsize=(8, 4))\n        w = 0.35\n        plt.bar(x - w / 2, accs, width=w, label=\"Accuracy\")\n        plt.bar(x + w / 2, stabs, width=w, label=\"Stability-adjusted accuracy\")\n        plt.xticks(x, names)\n        plt.ylabel(\"Metric value\")\n        plt.title(\n            f\"{dataset_name} dataset: Final test metrics\\nComparison of Stream Evaluation Modes\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset_name}_final_test_metrics_bar.png\"),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot6: {e}\")\n    plt.close()\n", "import matplotlib.pyplot as plt\nimport numpy as np\nimport os\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nos.makedirs(working_dir, exist_ok=True)\n\ntry:\n    experiment_data = np.load(\n        os.path.join(working_dir, \"experiment_data.npy\"), allow_pickle=True\n    ).item()\nexcept Exception as e:\n    print(f\"Error loading experiment data: {e}\")\n    experiment_data = {}\n\ndataset_name = next(iter(experiment_data.keys()), None)\nds = experiment_data.get(dataset_name, {}) if dataset_name else {}\nlosses = ds.get(\"losses\", {})\nmetrics = ds.get(\"metrics\", {})\nstream = ds.get(\"stream\", {})\npreds = ds.get(\"predictions\", {})\ngts = np.array(ds.get(\"ground_truth\", []))\n\n\ndef to_epoch_value(arr):\n    out = []\n    for x in arr:\n        try:\n            out.append((float(x[0]), float(x[1])))\n        except Exception:\n            pass\n    return np.array(out) if out else np.empty((0, 2))\n\n\ntrain_loss = to_epoch_value(losses.get(\"train\", []))\nval_loss = to_epoch_value(losses.get(\"val\", []))\ntrain_acc = to_epoch_value(metrics.get(\"train\", []))\nval_acc = to_epoch_value(metrics.get(\"val\", []))\ntest_metrics = metrics.get(\"test\", [])\n\nprint(f\"dataset={dataset_name}\")\nif len(train_loss):\n    print(f\"final_train_loss={train_loss[-1,1]:.4f}\")\nif len(val_loss):\n    print(f\"final_val_loss={val_loss[-1,1]:.4f}\")\nif len(train_acc):\n    print(f\"final_train_acc={train_acc[-1,1]:.4f}\")\nif len(val_acc):\n    print(f\"final_val_acc={val_acc[-1,1]:.4f}\")\nfor m in test_metrics:\n    if isinstance(m, dict):\n        print(\n            f\"{m.get('name','unknown')}: \"\n            f\"acc={m.get('acc', np.nan):.4f}, \"\n            f\"stability_adjusted_acc={m.get('stability_adjusted_acc', np.nan):.4f}, \"\n            f\"adapt_freq={m.get('adapt_freq', np.nan):.4f}, \"\n            f\"adapt_loss_mean={m.get('adapt_loss_mean', np.nan):.4f}\"\n        )\n\ntry:\n    if len(train_loss) and len(val_loss):\n        plt.figure(figsize=(8, 4))\n        plt.plot(train_loss[:, 0], train_loss[:, 1], label=\"Train loss\")\n        plt.plot(val_loss[:, 0], val_loss[:, 1], label=\"Validation loss\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Loss\")\n        plt.title(f\"{dataset_name} dataset: Training curves\\nTrain vs Validation Loss\")\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset_name}_training_validation_loss.png\"),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot1: {e}\")\n    plt.close()\n\ntry:\n    if len(train_acc) and len(val_acc):\n        plt.figure(figsize=(8, 4))\n        plt.plot(train_acc[:, 0], train_acc[:, 1], label=\"Train accuracy\")\n        plt.plot(val_acc[:, 0], val_acc[:, 1], label=\"Validation accuracy\")\n        plt.xlabel(\"Epoch\")\n        plt.ylabel(\"Accuracy\")\n        plt.title(\n            f\"{dataset_name} dataset: Training curves\\nTrain vs Validation Accuracy\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset_name}_training_validation_accuracy.png\"\n            ),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot2: {e}\")\n    plt.close()\n\ntry:\n    fr = np.array(stream.get(\"frozen_rolling_acc\", []))\n    en = np.array(stream.get(\"entropy_rolling_acc\", []))\n    co = np.array(stream.get(\"consistency_rolling_acc\", []))\n    eu = np.array(stream.get(\"entropy_updates\", []))\n    cu = np.array(stream.get(\"consistency_updates\", []))\n    if len(fr) or len(en) or len(co):\n        plt.figure(figsize=(10, 5))\n        if len(fr):\n            plt.plot(np.arange(len(fr)), fr, label=\"Frozen\", linewidth=2)\n        if len(en):\n            plt.plot(np.arange(len(en)), en, label=\"Entropy TTA\", linewidth=2)\n        if len(co):\n            plt.plot(np.arange(len(co)), co, label=\"Consistency-Gated TTA\", linewidth=2)\n        if len(en) and len(eu):\n            idx = np.where(eu == 1)[0]\n            if len(idx):\n                plt.scatter(idx, en[idx], s=10, alpha=0.4, label=\"Entropy updates\")\n        if len(co) and len(cu):\n            idx = np.where(cu == 1)[0]\n            if len(idx):\n                plt.scatter(idx, co[idx], s=12, alpha=0.5, label=\"Consistency updates\")\n        plt.xlabel(\"Stream step\")\n        plt.ylabel(\"Rolling accuracy\")\n        plt.title(\n            f\"{dataset_name} dataset: Stream performance\\nRolling Accuracy with Adaptation Events\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset_name}_stream_rolling_accuracy_updates.png\"\n            ),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot3: {e}\")\n    plt.close()\n\ntry:\n    n_show = (\n        min(60, len(gts), *(len(np.array(v)) for v in preds.values()))\n        if len(preds)\n        else min(60, len(gts))\n    )\n    if n_show > 0:\n        plt.figure(figsize=(10, 4))\n        plt.plot(np.arange(n_show), gts[:n_show], label=\"Ground Truth\", marker=\"o\")\n        for name in [\"frozen\", \"entropy\", \"consistency\"]:\n            arr = np.array(preds.get(name, []))\n            if len(arr) >= n_show:\n                plt.plot(\n                    np.arange(n_show),\n                    arr[:n_show],\n                    label=f\"{name.title()} Pred\",\n                    marker=\"x\" if name == \"entropy\" else None,\n                )\n        plt.xlabel(\"Sample index\")\n        plt.ylabel(\"Class\")\n        plt.title(\n            f\"{dataset_name} dataset: Prediction comparison\\nLeft: Ground Truth, Right: Generated Samples over Stream Prefix\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(\n                working_dir, f\"{dataset_name}_prediction_vs_ground_truth_prefix.png\"\n            ),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot4: {e}\")\n    plt.close()\n\ntry:\n    fc = np.array(stream.get(\"frozen_confidences\", []))\n    ec = np.array(stream.get(\"entropy_confidences\", []))\n    cc = np.array(stream.get(\"consistency_confidences\", []))\n    if len(fc) or len(ec) or len(cc):\n        plt.figure(figsize=(10, 4))\n        if len(fc):\n            plt.plot(np.arange(len(fc)), fc, label=\"Frozen confidence\")\n        if len(ec):\n            plt.plot(np.arange(len(ec)), ec, label=\"Entropy TTA confidence\")\n        if len(cc):\n            plt.plot(np.arange(len(cc)), cc, label=\"Consistency-Gated TTA confidence\")\n        plt.xlabel(\"Stream step\")\n        plt.ylabel(\"Confidence\")\n        plt.title(\n            f\"{dataset_name} dataset: Stream confidence\\nPrediction Confidence Across Stream Steps\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset_name}_stream_confidence_curves.png\"),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot5: {e}\")\n    plt.close()\n\ntry:\n    if test_metrics:\n        names = [m.get(\"name\", f\"model_{i}\") for i, m in enumerate(test_metrics)]\n        accs = [m.get(\"acc\", np.nan) for m in test_metrics]\n        stabs = [m.get(\"stability_adjusted_acc\", np.nan) for m in test_metrics]\n        x = np.arange(len(names))\n        plt.figure(figsize=(8, 4))\n        w = 0.35\n        plt.bar(x - w / 2, accs, width=w, label=\"Accuracy\")\n        plt.bar(x + w / 2, stabs, width=w, label=\"Stability-adjusted accuracy\")\n        plt.xticks(x, names)\n        plt.ylabel(\"Metric value\")\n        plt.title(\n            f\"{dataset_name} dataset: Final test metrics\\nComparison of Stream Evaluation Modes\"\n        )\n        plt.legend()\n        plt.tight_layout()\n        plt.savefig(\n            os.path.join(working_dir, f\"{dataset_name}_final_test_metrics_bar.png\"),\n            dpi=160,\n        )\n    plt.close()\nexcept Exception as e:\n    print(f\"Error creating plot6: {e}\")\n    plt.close()\n"], "plot_plan": [null, "I\u2019ll load the saved experiment dictionary, inspect the single dataset key, and extract only the arrays and records that are actually present. I\u2019ll then print a compact summary of the available train/validation losses, train/validation accuracies, and test metrics for the frozen, entropy, and consistency modes. For visualization, I\u2019ll create separate plots for training/validation loss, training/validation accuracy, stream rolling accuracy with adaptation events, prediction-vs-ground-truth over a short stream prefix, confidence over stream steps if present, and a bar chart of final test metrics. Each figure will be wrapped in its own try-except block, saved into the required working directory with descriptive filenames containing the dataset name and plot type, and closed afterward. To avoid inventing data, every plot will first check that the corresponding entries exist and have usable length. For sequence-style plots, I\u2019ll cap the displayed prefix to a reasonable length derived from the true available stream arrays. Titles will explicitly reference the synthetic dataset and use clear subtitles describing left/right or comparison content where appropriate. Finally, the script will print the extracted evaluation metrics so the run is useful even without opening the saved images.", null], "ablation_name": [null, null, null], "hyperparam_name": [null, null, null], "is_seed_node": [false, false, true], "is_seed_agg_node": [false, false, false], "parse_metrics_plan": ["I\u2019ll load the saved `experiment_data.npy` from the `working` directory, inspect\nthe nested structure, and extract the final or best values from the recorded\ntrain/validation losses and accuracies, plus the test-time stream metrics. Since\nthe saved object uses lists of tuples for train/validation and a list of\ndictionaries for test results, I\u2019ll handle each case explicitly and print clear\nmetric names for each dataset. The script will avoid plotting and execute\nimmediately at global scope, while remaining robust to small structure\nvariations.", "I\u2019ll load the saved `experiment_data.npy` from the `working` directory, inspect\nits nested structure, and extract the final or best values from the stored\ntraining, validation, and test metrics. For each dataset key, I\u2019ll print the\ndataset name first, then clearly labeled metric names such as train accuracy,\nvalidation loss, best validation accuracy, and test accuracy for each test mode.\nSince the saved test metrics are stored as a list of dictionaries, I\u2019ll handle\nthose separately and print the final reported values for each method. The script\nwill run immediately at global scope and will not generate any plots.", "I\u2019ll load the saved `experiment_data.npy` from the `working` directory, inspect\nits nested structure, and extract the final or best values from the stored\ntraining, validation, and test metrics. For each dataset key, I\u2019ll print the\ndataset name first, then clearly labeled metric names such as train accuracy,\nvalidation loss, best validation accuracy, and test accuracy for each test mode.\nSince the saved test metrics are stored as a list of dictionaries, I\u2019ll handle\nthose separately and print the final reported values for each method. The script\nwill run immediately at global scope and will not generate any plots."], "parse_metrics_code": ["import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nfile_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(file_path, allow_pickle=True).item()\n\n\ndef get_best_tuple_entry(entries, mode=\"max\"):\n    if not entries:\n        return None\n    if mode == \"max\":\n        return max(entries, key=lambda x: x[1])\n    return min(entries, key=lambda x: x[1])\n\n\ndef get_final_tuple_entry(entries):\n    if not entries:\n        return None\n    return entries[-1]\n\n\ndef print_tuple_metric(label, entry):\n    if entry is None:\n        print(f\"{label}: not available\")\n    else:\n        epoch, value, timestamp = entry\n        print(f\"{label}: {value:.6f} (epoch={epoch}, timestamp={timestamp:.6f})\")\n\n\ndef print_scalar_metric(label, value):\n    if value is None:\n        print(f\"{label}: not available\")\n    elif isinstance(value, (float, np.floating)):\n        print(f\"{label}: {float(value):.6f}\")\n    else:\n        print(f\"{label}: {value}\")\n\n\nfor dataset_name, dataset_payload in experiment_data.items():\n    print(f\"Dataset: {dataset_name}\")\n\n    metrics = dataset_payload.get(\"metrics\", {})\n    losses = dataset_payload.get(\"losses\", {})\n\n    train_acc_entries = metrics.get(\"train\", [])\n    val_acc_entries = metrics.get(\"val\", [])\n    train_loss_entries = losses.get(\"train\", [])\n    val_loss_entries = losses.get(\"val\", [])\n\n    best_train_acc = get_best_tuple_entry(train_acc_entries, mode=\"max\")\n    final_train_acc = get_final_tuple_entry(train_acc_entries)\n    best_validation_acc = get_best_tuple_entry(val_acc_entries, mode=\"max\")\n    final_validation_acc = get_final_tuple_entry(val_acc_entries)\n\n    best_train_loss = get_best_tuple_entry(train_loss_entries, mode=\"min\")\n    final_train_loss = get_final_tuple_entry(train_loss_entries)\n    best_validation_loss = get_best_tuple_entry(val_loss_entries, mode=\"min\")\n    final_validation_loss = get_final_tuple_entry(val_loss_entries)\n\n    print_tuple_metric(\"best train accuracy\", best_train_acc)\n    print_tuple_metric(\"final train accuracy\", final_train_acc)\n    print_tuple_metric(\"best validation accuracy\", best_validation_acc)\n    print_tuple_metric(\"final validation accuracy\", final_validation_acc)\n\n    print_tuple_metric(\"best train loss\", best_train_loss)\n    print_tuple_metric(\"final train loss\", final_train_loss)\n    print_tuple_metric(\"best validation loss\", best_validation_loss)\n    print_tuple_metric(\"final validation loss\", final_validation_loss)\n\n    test_metrics = metrics.get(\"test\", [])\n    if test_metrics:\n        for test_entry in test_metrics:\n            method_name = test_entry.get(\"name\", \"unknown\")\n            print(f\"Dataset: {dataset_name} | Evaluation setting: {method_name}\")\n            print_scalar_metric(\"final test accuracy\", test_entry.get(\"acc\"))\n            print_scalar_metric(\n                \"final test stability adjusted accuracy\",\n                test_entry.get(\"stability_adjusted_acc\"),\n            )\n            print_scalar_metric(\n                \"final test adaptation frequency\",\n                test_entry.get(\"adapt_freq\"),\n            )\n            print_scalar_metric(\n                \"final test mean adaptation loss\",\n                test_entry.get(\"adapt_loss_mean\"),\n            )\n    else:\n        print(\"final test metrics: not available\")\n\n    print()\n", "import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nexperiment_data_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(experiment_data_path, allow_pickle=True).item()\n\n\ndef safe_float(x):\n    try:\n        return float(x)\n    except Exception:\n        return x\n\n\ndef get_final_tuple_value(records):\n    if not records:\n        return None\n    last = records[-1]\n    if isinstance(last, (list, tuple)) and len(last) >= 2:\n        return safe_float(last[1])\n    return None\n\n\ndef get_best_tuple_value(records, mode=\"max\"):\n    if not records:\n        return None\n    values = []\n    for item in records:\n        if isinstance(item, (list, tuple)) and len(item) >= 2:\n            values.append(safe_float(item[1]))\n    if not values:\n        return None\n    return max(values) if mode == \"max\" else min(values)\n\n\ndef print_metric(label, value):\n    if value is None:\n        print(f\"{label}: N/A\")\n    elif isinstance(value, float):\n        print(f\"{label}: {value:.6f}\")\n    else:\n        print(f\"{label}: {value}\")\n\n\nfor dataset_name, dataset_payload in experiment_data.items():\n    print(f\"Dataset: {dataset_name}\")\n\n    metrics = dataset_payload.get(\"metrics\", {})\n    losses = dataset_payload.get(\"losses\", {})\n\n    train_accuracy_final = get_final_tuple_value(metrics.get(\"train\", []))\n    train_accuracy_best = get_best_tuple_value(metrics.get(\"train\", []), mode=\"max\")\n\n    validation_accuracy_final = get_final_tuple_value(metrics.get(\"val\", []))\n    validation_accuracy_best = get_best_tuple_value(metrics.get(\"val\", []), mode=\"max\")\n\n    train_loss_final = get_final_tuple_value(losses.get(\"train\", []))\n    train_loss_best = get_best_tuple_value(losses.get(\"train\", []), mode=\"min\")\n\n    validation_loss_final = get_final_tuple_value(losses.get(\"val\", []))\n    validation_loss_best = get_best_tuple_value(losses.get(\"val\", []), mode=\"min\")\n\n    print_metric(\"Final train accuracy\", train_accuracy_final)\n    print_metric(\"Best train accuracy\", train_accuracy_best)\n    print_metric(\"Final validation accuracy\", validation_accuracy_final)\n    print_metric(\"Best validation accuracy\", validation_accuracy_best)\n    print_metric(\"Final train loss\", train_loss_final)\n    print_metric(\"Best train loss\", train_loss_best)\n    print_metric(\"Final validation loss\", validation_loss_final)\n    print_metric(\"Best validation loss\", validation_loss_best)\n\n    test_metrics = metrics.get(\"test\", [])\n    if test_metrics:\n        for test_entry in test_metrics:\n            if isinstance(test_entry, dict):\n                method_name = test_entry.get(\"name\", \"unknown\")\n                print_metric(f\"Test accuracy ({method_name})\", test_entry.get(\"acc\"))\n                print_metric(\n                    f\"Test stability-adjusted accuracy ({method_name})\",\n                    test_entry.get(\"stability_adjusted_acc\"),\n                )\n                print_metric(\n                    f\"Test adaptation frequency ({method_name})\",\n                    test_entry.get(\"adapt_freq\"),\n                )\n                print_metric(\n                    f\"Test adaptation loss mean ({method_name})\",\n                    test_entry.get(\"adapt_loss_mean\"),\n                )\n    else:\n        print(\"Test metrics: N/A\")\n\n    print()\n", "import os\nimport numpy as np\n\nworking_dir = os.path.join(os.getcwd(), \"working\")\nexperiment_data_path = os.path.join(working_dir, \"experiment_data.npy\")\n\nexperiment_data = np.load(experiment_data_path, allow_pickle=True).item()\n\n\ndef safe_float(x):\n    try:\n        return float(x)\n    except Exception:\n        return x\n\n\ndef get_final_tuple_value(records):\n    if not records:\n        return None\n    last = records[-1]\n    if isinstance(last, (list, tuple)) and len(last) >= 2:\n        return safe_float(last[1])\n    return None\n\n\ndef get_best_tuple_value(records, mode=\"max\"):\n    if not records:\n        return None\n    values = []\n    for item in records:\n        if isinstance(item, (list, tuple)) and len(item) >= 2:\n            values.append(safe_float(item[1]))\n    if not values:\n        return None\n    return max(values) if mode == \"max\" else min(values)\n\n\ndef print_metric(label, value):\n    if value is None:\n        print(f\"{label}: N/A\")\n    elif isinstance(value, float):\n        print(f\"{label}: {value:.6f}\")\n    else:\n        print(f\"{label}: {value}\")\n\n\nfor dataset_name, dataset_payload in experiment_data.items():\n    print(f\"Dataset: {dataset_name}\")\n\n    metrics = dataset_payload.get(\"metrics\", {})\n    losses = dataset_payload.get(\"losses\", {})\n\n    train_accuracy_final = get_final_tuple_value(metrics.get(\"train\", []))\n    train_accuracy_best = get_best_tuple_value(metrics.get(\"train\", []), mode=\"max\")\n\n    validation_accuracy_final = get_final_tuple_value(metrics.get(\"val\", []))\n    validation_accuracy_best = get_best_tuple_value(metrics.get(\"val\", []), mode=\"max\")\n\n    train_loss_final = get_final_tuple_value(losses.get(\"train\", []))\n    train_loss_best = get_best_tuple_value(losses.get(\"train\", []), mode=\"min\")\n\n    validation_loss_final = get_final_tuple_value(losses.get(\"val\", []))\n    validation_loss_best = get_best_tuple_value(losses.get(\"val\", []), mode=\"min\")\n\n    print_metric(\"Final train accuracy\", train_accuracy_final)\n    print_metric(\"Best train accuracy\", train_accuracy_best)\n    print_metric(\"Final validation accuracy\", validation_accuracy_final)\n    print_metric(\"Best validation accuracy\", validation_accuracy_best)\n    print_metric(\"Final train loss\", train_loss_final)\n    print_metric(\"Best train loss\", train_loss_best)\n    print_metric(\"Final validation loss\", validation_loss_final)\n    print_metric(\"Best validation loss\", validation_loss_best)\n\n    test_metrics = metrics.get(\"test\", [])\n    if test_metrics:\n        for test_entry in test_metrics:\n            if isinstance(test_entry, dict):\n                method_name = test_entry.get(\"name\", \"unknown\")\n                print_metric(f\"Test accuracy ({method_name})\", test_entry.get(\"acc\"))\n                print_metric(\n                    f\"Test stability-adjusted accuracy ({method_name})\",\n                    test_entry.get(\"stability_adjusted_acc\"),\n                )\n                print_metric(\n                    f\"Test adaptation frequency ({method_name})\",\n                    test_entry.get(\"adapt_freq\"),\n                )\n                print_metric(\n                    f\"Test adaptation loss mean ({method_name})\",\n                    test_entry.get(\"adapt_loss_mean\"),\n                )\n    else:\n        print(\"Test metrics: N/A\")\n\n    print()\n"], "parse_term_out": ["['Dataset: synthetic_vlm_stream', '\\n', 'best train accuracy: 1.000000 (epoch=5,\ntimestamp=1774747100.947198)', '\\n', 'final train accuracy: 1.000000 (epoch=12,\ntimestamp=1774747101.371581)', '\\n', 'best validation accuracy: 0.202000\n(epoch=1, timestamp=1774747100.704658)', '\\n', 'final validation accuracy:\n0.196000 (epoch=12, timestamp=1774747101.371581)', '\\n', 'best train loss:\n0.212373 (epoch=12, timestamp=1774747101.371581)', '\\n', 'final train loss:\n0.212373 (epoch=12, timestamp=1774747101.371581)', '\\n', 'best validation loss:\n2.379768 (epoch=1, timestamp=1774747100.704658)', '\\n', 'final validation loss:\n6.055633 (epoch=12, timestamp=1774747101.371581)', '\\n', 'Dataset:\nsynthetic_vlm_stream | Evaluation setting: frozen', '\\n', 'final test accuracy:\n0.192857', '\\n', 'final test stability adjusted accuracy: 0.192857', '\\n',\n'final test adaptation frequency: 0.000000', '\\n', 'final test mean adaptation\nloss: 0.000000', '\\n', 'Dataset: synthetic_vlm_stream | Evaluation setting:\nentropy', '\\n', 'final test accuracy: 0.270000', '\\n', 'final test stability\nadjusted accuracy: 0.257534', '\\n', 'final test adaptation frequency: 1.000000',\n'\\n', 'final test mean adaptation loss: 0.011743', '\\n', 'Dataset:\nsynthetic_vlm_stream | Evaluation setting: consistency', '\\n', 'final test\naccuracy: 0.197143', '\\n', 'final test stability adjusted accuracy: 0.197143',\n'\\n', 'final test adaptation frequency: 0.001429', '\\n', 'final test mean\nadaptation loss: 0.001204', '\\n', '\\n', 'Execution time: a moment seconds (time\nlimit is 2 hours).']", "['Dataset: synthetic_vlm_stream', '\\n', 'Final train accuracy: 1.000000', '\\n',\n'Best train accuracy: 1.000000', '\\n', 'Final validation accuracy: 1.000000',\n'\\n', 'Best validation accuracy: 1.000000', '\\n', 'Final train loss: 0.059357',\n'\\n', 'Best train loss: 0.059357', '\\n', 'Final validation loss: 0.062449',\n'\\n', 'Best validation loss: 0.062449', '\\n', 'Test accuracy (frozen):\n0.682857', '\\n', 'Test stability-adjusted accuracy (frozen): 0.682857', '\\n',\n'Test adaptation frequency (frozen): 0.000000', '\\n', 'Test adaptation loss mean\n(frozen): 0.000000', '\\n', 'Test accuracy (entropy): 0.444286', '\\n', 'Test\nstability-adjusted accuracy (entropy): 0.430584', '\\n', 'Test adaptation\nfrequency (entropy): 1.000000', '\\n', 'Test adaptation loss mean (entropy):\n0.045018', '\\n', 'Test accuracy (consistency): 0.817143', '\\n', 'Test stability-\nadjusted accuracy (consistency): 0.809172', '\\n', 'Test adaptation frequency\n(consistency): 0.651429', '\\n', 'Test adaptation loss mean (consistency):\n0.060290', '\\n', '\\n', 'Execution time: a moment seconds (time limit is 2\nhours).']", "['Dataset: synthetic_vlm_stream', '\\n', 'Final train accuracy: 1.000000', '\\n',\n'Best train accuracy: 1.000000', '\\n', 'Final validation accuracy: 1.000000',\n'\\n', 'Best validation accuracy: 1.000000', '\\n', 'Final train loss: 0.059357',\n'\\n', 'Best train loss: 0.059357', '\\n', 'Final validation loss: 0.062449',\n'\\n', 'Best validation loss: 0.062449', '\\n', 'Test accuracy (frozen):\n0.682857', '\\n', 'Test stability-adjusted accuracy (frozen): 0.682857', '\\n',\n'Test adaptation frequency (frozen): 0.000000', '\\n', 'Test adaptation loss mean\n(frozen): 0.000000', '\\n', 'Test accuracy (entropy): 0.444286', '\\n', 'Test\nstability-adjusted accuracy (entropy): 0.430584', '\\n', 'Test adaptation\nfrequency (entropy): 1.000000', '\\n', 'Test adaptation loss mean (entropy):\n0.045018', '\\n', 'Test accuracy (consistency): 0.817143', '\\n', 'Test stability-\nadjusted accuracy (consistency): 0.809172', '\\n', 'Test adaptation frequency\n(consistency): 0.651429', '\\n', 'Test adaptation loss mean (consistency):\n0.060290', '\\n', '\\n', 'Execution time: a moment seconds (time limit is 2\nhours).']"], "parse_exc_type": [null, null, null], "parse_exc_info": [null, null, null], "parse_exc_stack": [null, null, null], "completed_stages": ["Stage_1"]};
+
+// Add log directory path and stage info to the tree data
+treeStructData.log_dir_path = window.location.pathname.split('/').slice(0, -1).join('/');
+treeStructData.current_stage = window.location.pathname.includes('stage_')
+  ? window.location.pathname.split('stage_')[1].split('/')[0]
+  : 'Stage_1';
+
+// Initialize background color
+window.bgColCurrent = bgCol;
+
+// Function to set background color that can be called from the console
+function setBackgroundColor(color) {
+  // Update the global color
+  updateBackgroundColor(color);
+
+  // Refresh the current sketch to apply the new background color
+  if (currentStage) {
+    startSketch(currentStage);
+  }
+}
+
+// Load all stage data and initialize the visualization
+loadAllStageData(treeStructData);
+
+    </script>
+    <title>AI Scientist-v2 Visualization</title>
+    <style>
+      body,
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background-color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      #canvas-container {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 40vw;
+        height: 100vh;
+        background-color: inherit;
+        padding-top: 40px;
+      }
+      canvas {
+        float: left;
+        height: 100vh;
+        width: 100vw;
+      }
+      #text-container {
+        float: right;
+        height: 100vh;
+        width: 50vw;
+        background-color: #282c34;
+        overflow: auto;
+      }
+      #plan {
+        /* border-left: 2px solid #282c34; */
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+      }
+      #plot_plan {
+        background-color: #282c34;
+        color: #f2f0e7;
+        min-height: 5rem;
+        padding: 1em 0 1em 1em;
+        white-space: pre-wrap;
+      }
+      #exec_time_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exec_time {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #exc_info {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #2c1f1f;
+        border-left: 3px solid #ff5555;
+        color: #f2f0e7;
+      }
+      #metrics {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+      }
+      #vlm_feedback {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #1f2c2f;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      #vlm_feedback p {
+        margin: 0.5em 0;
+        white-space: pre-wrap;
+      }
+      .datasets_successfully_tested {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        border-left: 3px solid #55ff55;
+      }
+      .plots-container {
+        float: right;
+        width: 50vw;
+        padding: 1rem;
+        background-color: #282c34;
+        margin-top: 1rem;
+      }
+
+      .plot-item {
+        flex: 1 1 300px;
+        max-width: 100%;
+        margin-bottom: 1rem;
+        white-space: pre-wrap;
+      }
+
+      .plot-item img {
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: block;
+      }
+
+      .metric-group {
+        margin-bottom: 20px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+
+      .metric-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+
+      .metric-table th,
+      .metric-table td {
+        padding: 8px;
+        text-align: left;
+        border: 1px solid #ddd;
+      }
+
+      .metric-table th {
+        background-color: #363b44;
+      }
+
+      /* Styles for tabs */
+      .tabs-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 49vw;
+        background-color: #000000;
+        z-index: 10;
+        display: flex;
+        padding: 0;
+      }
+
+      .tab {
+        cursor: pointer;
+        padding: 10px 15px;
+        background-color: #333;
+        color: #f2f0e7;
+        border: none;
+        outline: none;
+        transition: background-color 0.3s;
+        flex: 1;
+        text-align: center;
+      }
+
+      .tab:hover {
+        background-color: #444;
+      }
+
+      .tab.active {
+        background-color: #4c76af;
+        font-weight: bold;
+      }
+
+      .tab.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background-color: #282c34;
+      }
+
+      .tab-content {
+        display: none;
+        padding-top: 40px; /* Space for tabs */
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .stage-info {
+        padding: 10px;
+        background-color: #282c34;
+        color: #f2f0e7;
+        margin-bottom: 10px;
+        font-size: 0.9em;
+      }
+
+      .stage-status {
+        display: inline-block;
+        padding: 3px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+        font-size: 0.8em;
+      }
+
+      .stage-status.completed {
+        background-color: #4caf50;
+      }
+
+      .stage-status.in-progress {
+        background-color: #2196f3;
+      }
+
+      .stage-status.not-started {
+        background-color: #9e9e9e;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tabs-container" id="stage-tabs">
+      <button class="tab" data-stage="Stage_1" onclick="selectStage('Stage_1')">Stage 1</button>
+      <button class="tab" data-stage="Stage_2" onclick="selectStage('Stage_2')">Stage 2</button>
+      <button class="tab" data-stage="Stage_3" onclick="selectStage('Stage_3')">Stage 3</button>
+      <button class="tab" data-stage="Stage_4" onclick="selectStage('Stage_4')">Stage 4</button>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <pre id="text-container">
+        <div id="stage-info" class="stage-info"></div>
+        <div id="plan"></div>
+        <hr>
+        <div id="exc_info"></div>
+        <hr>
+        <div id="exec_time"></div>
+        <hr>
+        <div id="exec_time_feedback"></div>
+        <hr>
+        <div id="metrics"></div>
+        <hr>
+        <div id="plot_plan"></div>
+        <hr>
+        <div class="plots-container" id="plots"></div>
+        <hr>
+        <div id="vlm_feedback"></div>
+        <hr>
+        <div id="datasets_successfully_tested"></div>
+        <hr>
+        <code id="code" class="language-python"></code>
+        <hr>
+        <code id="plot_code" class="language-python"></code>
+    </pre>
+  </body>
+</html>
