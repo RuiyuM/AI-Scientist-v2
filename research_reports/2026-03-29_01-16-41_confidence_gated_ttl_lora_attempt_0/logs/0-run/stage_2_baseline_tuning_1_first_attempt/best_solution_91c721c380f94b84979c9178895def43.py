@@ -5,7 +5,6 @@ os.makedirs(working_dir, exist_ok=True)
 
 import copy
 import time
-import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -19,16 +18,8 @@ print(f"Using device: {device}")
 torch.manual_seed(42)
 np.random.seed(42)
 
-dataset_names = [
-    "synthetic_shift_stream",
-    "rotated_shift_stream",
-    "imbalanced_noise_stream",
-    "arc_style_stream",
-    "mmlu_style_stream",
-]
-
 experiment_data = {
-    name: {
+    "synthetic_shift_stream": {
         "metrics": {"train": [], "val": [], "stream": []},
         "losses": {"train": [], "val": []},
         "predictions": [],
@@ -38,8 +29,29 @@ experiment_data = {
         "segment_accs": [],
         "config_results": {},
         "summary": {},
-    }
-    for name in dataset_names
+    },
+    "rotated_shift_stream": {
+        "metrics": {"train": [], "val": [], "stream": []},
+        "losses": {"train": [], "val": []},
+        "predictions": [],
+        "ground_truth": [],
+        "entropies": [],
+        "segment_ids": [],
+        "segment_accs": [],
+        "config_results": {},
+        "summary": {},
+    },
+    "imbalanced_noise_stream": {
+        "metrics": {"train": [], "val": [], "stream": []},
+        "losses": {"train": [], "val": []},
+        "predictions": [],
+        "ground_truth": [],
+        "entropies": [],
+        "segment_ids": [],
+        "segment_accs": [],
+        "config_results": {},
+        "summary": {},
+    },
 }
 
 
@@ -57,22 +69,20 @@ class NumpyDataset(Dataset):
 
 def make_gaussian_data(n, means, cov_scale=0.8, shift=None, class_probs=None):
     xs, ys = [], []
-    if class_probs is None:
-        counts = [n] * len(means)
-    else:
-        total_n = n * len(means)
-        counts = np.random.multinomial(total_n, class_probs).tolist()
+    counts = [n] * len(means)
+    if class_probs is not None:
+        counts = np.random.multinomial(n * len(means), class_probs).tolist()
     for c, m in enumerate(means):
         mean = np.array(m, dtype=np.float32)
         if shift is not None:
             mean = shift(mean, c)
         cov = np.eye(len(mean), dtype=np.float32) * cov_scale
         cnt = counts[c]
-        if cnt <= 0:
+        if cnt == 0:
             continue
-        pts = np.random.multivariate_normal(mean, cov, size=cnt).astype(np.float32)
+        pts = np.random.multivariate_normal(mean, cov, size=cnt)
         xs.append(pts)
-        ys.append(np.full(cnt, c, dtype=np.int64))
+        ys.append(np.full(cnt, c))
     x = np.concatenate(xs, axis=0).astype(np.float32)
     y = np.concatenate(ys, axis=0).astype(np.int64)
     idx = np.random.permutation(len(x))
@@ -100,7 +110,7 @@ class LoRALinear(nn.Module):
         self.A = nn.Parameter(torch.zeros(in_features, rank))
         self.B = nn.Parameter(torch.zeros(rank, out_features))
         nn.init.normal_(self.A, std=0.02)
-        nn.init.normal_(self.B, std=0.02)
+        nn.init.normal_(self.B, std=0.02)  # bugfix: avoid exactly-zero LoRA path
 
     def forward(self, x):
         return self.base(x) + (x @ self.A @ self.B) * (self.alpha / self.rank)
@@ -135,7 +145,7 @@ def evaluate(model, loader):
             total_loss += loss.item() * x.size(0)
             total_correct += (logits.argmax(dim=1) == y).sum().item()
             total += x.size(0)
-    return total_loss / max(total, 1), total_correct / max(total, 1)
+    return total_loss / total, total_correct / total
 
 
 def freeze_except_lora(m):
@@ -154,12 +164,6 @@ def batch_margin(logits):
     probs = torch.softmax(logits, dim=-1)
     top2 = torch.topk(probs, k=2, dim=-1).values
     return top2[:, 0] - top2[:, 1]
-
-
-def reset_lora_params(m):
-    with torch.no_grad():
-        nn.init.normal_(m.head.A, std=0.02)
-        nn.init.normal_(m.head.B, std=0.02)
 
 
 def build_stream(dataset_name):
@@ -198,41 +202,6 @@ def build_stream(dataset_name):
         ]
         covs = [0.7, 1.1, 1.15, 1.2]
         probs = [None, [0.65, 0.25, 0.10], [0.20, 0.60, 0.20], [0.10, 0.20, 0.70]]
-    elif dataset_name == "arc_style_stream":
-        shifts = [
-            lambda mean, c: mean,
-            lambda mean, c: mean + np.array([0.2, 0.9 * (c - 1)], dtype=np.float32),
-            lambda mean, c: mean * np.array([0.85, 1.25], dtype=np.float32),
-            lambda mean, c: np.array([mean[0] + 0.6, -0.8 * mean[1]], dtype=np.float32),
-            lambda mean, c: mean + np.array([-0.8, 0.4], dtype=np.float32),
-        ]
-        covs = [0.65, 0.8, 0.95, 1.0, 1.1]
-        probs = [None, None, [0.45, 0.35, 0.20], [0.25, 0.50, 0.25], [0.20, 0.25, 0.55]]
-    elif dataset_name == "mmlu_style_stream":
-
-        def rot(theta):
-            ct, st = np.cos(theta), np.sin(theta)
-            return np.array([[ct, -st], [st, ct]], dtype=np.float32)
-
-        shifts = [
-            lambda mean, c: mean,
-            lambda mean, c: rot(np.pi / 10) @ mean
-            + np.array([0.1, 0.1], dtype=np.float32),
-            lambda mean, c: rot(-np.pi / 7) @ mean
-            + np.array([-0.3, 0.5], dtype=np.float32),
-            lambda mean, c: mean * np.array([1.15, 0.8], dtype=np.float32)
-            + np.array([0.0, -0.2], dtype=np.float32),
-            lambda mean, c: np.array([mean[1], mean[0]], dtype=np.float32) * 0.75
-            + np.array([0.2, 0.3], dtype=np.float32),
-        ]
-        covs = [0.7, 0.85, 0.95, 1.0, 1.1]
-        probs = [
-            None,
-            [0.34, 0.33, 0.33],
-            [0.50, 0.30, 0.20],
-            [0.20, 0.55, 0.25],
-            [0.25, 0.25, 0.50],
-        ]
     else:
         raise ValueError(dataset_name)
 
@@ -240,31 +209,24 @@ def build_stream(dataset_name):
         x, y = make_gaussian_data(
             90, base_means, cov_scale=covs[sid], shift=sh, class_probs=probs[sid]
         )
-        x = (x - mu) / sigma
-        segs.append((x.astype(np.float32), y.astype(np.int64), sid))
+        x = (x - mu) / sigma  # important normalization
+        segs.append((x, y, sid))
     return segs
-
-
-def safe_srag(gain, adapt_frequency, min_freq=0.05):
-    if adapt_frequency <= 0:
-        return 0.0
-    return float(gain / max(adapt_frequency, min_freq))
 
 
 def run_stream(
     base_state,
     dataset_name,
     adapt_mode="none",
-    entropy_threshold=0.45,
-    margin_threshold=0.35,
-    adapt_steps=2,
-    adapt_lr=5e-3,
+    entropy_threshold=0.70,
+    margin_threshold=0.55,
+    adapt_steps=3,
+    adapt_lr=1e-2,
 ):
     stream_segments = build_stream(dataset_name)
     m = SmallNet(in_dim=input_dim, out_dim=num_classes, rank=4).to(device)
     m.load_state_dict(copy.deepcopy(base_state))
     freeze_except_lora(m)
-    reset_lora_params(m)
     opt = torch.optim.Adam([m.head.A, m.head.B], lr=adapt_lr)
 
     all_preds, all_gt, all_seg, all_ent = [], [], [], []
@@ -307,8 +269,7 @@ def run_stream(
                     p = torch.softmax(logits_adapt, dim=-1)
                     ent_loss = batch_entropy(logits_adapt).mean()
                     conf_reg = -torch.max(p, dim=-1).values.mean()
-                    l2_pen = 1e-4 * (m.head.A.pow(2).mean() + m.head.B.pow(2).mean())
-                    adapt_loss = ent_loss + 0.20 * conf_reg + l2_pen
+                    adapt_loss = ent_loss + 0.25 * conf_reg
                     adapt_loss.backward()
                     torch.nn.utils.clip_grad_norm_([m.head.A, m.head.B], 1.0)
                     opt.step()
@@ -334,8 +295,6 @@ def run_stream(
         "entropies": np.array(all_ent, dtype=np.float32),
         "segment_accs": np.array(seg_accs, dtype=np.float32),
         "adapt_frequency": float(num_adapt_batches / max(total_batches, 1)),
-        "num_adapt_batches": int(num_adapt_batches),
-        "total_batches": int(total_batches),
     }
 
 
@@ -349,13 +308,12 @@ def train_and_eval_config(base_lr, epochs, batch_size, dataset_name):
     val_loader = DataLoader(NumpyDataset(val_x, val_y), batch_size=128, shuffle=False)
 
     model = SmallNet(in_dim=input_dim, out_dim=num_classes, rank=4).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=base_lr, weight_decay=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=base_lr)
 
     train_metrics, val_metrics = [], []
     train_losses, val_losses = [], []
     timestamps = []
-    best_state, best_val_acc, best_val_loss, best_epoch = None, -1.0, float("inf"), -1
-    patience, bad_epochs = 6, 0
+    best_state, best_val_acc, best_val_loss, best_epoch = None, -1.0, None, -1
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -369,15 +327,14 @@ def train_and_eval_config(base_lr, epochs, batch_size, dataset_name):
             logits = model(x)
             loss = F.cross_entropy(logits, y)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             running_loss += loss.item() * x.size(0)
             running_correct += (logits.argmax(dim=1) == y).sum().item()
             total += x.size(0)
 
-        train_loss = running_loss / max(total, 1)
-        train_acc = running_correct / max(total, 1)
+        train_loss = running_loss / total
+        train_acc = running_correct / total
         val_loss, val_acc = evaluate(model, val_loader)
 
         train_metrics.append((epoch, train_acc))
@@ -393,38 +350,30 @@ def train_and_eval_config(base_lr, epochs, batch_size, dataset_name):
             f"Config lr={base_lr:.1e}, bs={batch_size}, ep={epochs} | train_loss={train_loss:.4f} train_acc={train_acc:.4f} val_acc={val_acc:.4f}"
         )
 
-        improved = (val_acc > best_val_acc + 1e-6) or (
-            abs(val_acc - best_val_acc) <= 1e-6 and val_loss < best_val_loss
-        )
-        if improved:
+        if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_val_loss = val_loss
             best_epoch = epoch
             best_state = copy.deepcopy(model.state_dict())
-            bad_epochs = 0
-        else:
-            bad_epochs += 1
-            if bad_epochs >= patience:
-                break
 
     results_none = run_stream(best_state, dataset_name, "none")
     results_always = run_stream(
-        best_state, dataset_name, "always", adapt_steps=2, adapt_lr=5e-3
+        best_state, dataset_name, "always", adapt_steps=3, adapt_lr=1e-2
     )
     results_gated = run_stream(
         best_state,
         dataset_name,
         "gated",
-        entropy_threshold=0.45,
-        margin_threshold=0.35,
-        adapt_steps=2,
-        adapt_lr=5e-3,
+        entropy_threshold=0.70,
+        margin_threshold=0.55,
+        adapt_steps=3,
+        adapt_lr=1e-2,
     )
 
     gain_always = results_always["shift_robust_acc"] - results_none["shift_robust_acc"]
     gain_gated = results_gated["shift_robust_acc"] - results_none["shift_robust_acc"]
-    srag_always = safe_srag(gain_always, results_always["adapt_frequency"])
-    srag_gated = safe_srag(gain_gated, results_gated["adapt_frequency"])
+    srag_always = gain_always / max(results_always["adapt_frequency"], 1e-6)
+    srag_gated = gain_gated / max(results_gated["adapt_frequency"], 1e-6)
 
     return {
         "config": {"base_lr": base_lr, "epochs": epochs, "batch_size": batch_size},
@@ -438,8 +387,6 @@ def train_and_eval_config(base_lr, epochs, batch_size, dataset_name):
                     "gated": results_gated["shift_robust_acc"],
                     "adapt_frequency_always": results_always["adapt_frequency"],
                     "adapt_frequency_gated": results_gated["adapt_frequency"],
-                    "num_adapt_batches_always": results_always["num_adapt_batches"],
-                    "num_adapt_batches_gated": results_gated["num_adapt_batches"],
                     "shift_robust_accuracy_gain_always": gain_always,
                     "shift_robust_accuracy_gain_gated": gain_gated,
                     "srag_always": srag_always,
@@ -472,17 +419,23 @@ def train_and_eval_config(base_lr, epochs, batch_size, dataset_name):
     }
 
 
+dataset_names = [
+    "synthetic_shift_stream",
+    "rotated_shift_stream",
+    "imbalanced_noise_stream",
+]
 configs = [
-    {"base_lr": 5e-4, "epochs": 30, "batch_size": 32},
-    {"base_lr": 1e-3, "epochs": 30, "batch_size": 32},
-    {"base_lr": 2e-3, "epochs": 24, "batch_size": 64},
+    {"base_lr": 3e-4, "epochs": 24, "batch_size": 32},
+    {"base_lr": 1e-3, "epochs": 24, "batch_size": 32},
+    {"base_lr": 3e-3, "epochs": 16, "batch_size": 64},
 ]
 
 for dataset_name in dataset_names:
     store = experiment_data[dataset_name]
     print(f"\n===== Running dataset: {dataset_name} =====")
-    best_idx, best_score = None, -1e9
-    for cfg in configs:
+    best_idx = None
+    best_score = -1e9
+    for i, cfg in enumerate(configs):
         key = f"lr_{cfg['base_lr']}_ep_{cfg['epochs']}_bs_{cfg['batch_size']}".replace(
             ".", "p"
         ).replace("-", "m")
@@ -495,11 +448,12 @@ for dataset_name in dataset_names:
             best_score = result["metrics"]["stream"][0]["gated"]
             best_idx = key
 
-        s = result["metrics"]["stream"][0]
         print(
             f"{dataset_name} | {key} | best_val_acc={result['best_val_acc']:.4f} | "
-            f"stream_none={s['no_adapt']:.4f} | stream_always={s['always_on']:.4f} | "
-            f"stream_gated={s['gated']:.4f} | srag_gated={s['srag_gated']:.4f}"
+            f"stream_none={result['metrics']['stream'][0]['no_adapt']:.4f} | "
+            f"stream_always={result['metrics']['stream'][0]['always_on']:.4f} | "
+            f"stream_gated={result['metrics']['stream'][0]['gated']:.4f} | "
+            f"srag_gated={result['metrics']['stream'][0]['srag_gated']:.4f}"
         )
 
     keys = list(store["config_results"].keys())
@@ -562,14 +516,13 @@ for dataset_name in dataset_names:
     )
     val_loss_arr = np.array([x[1] for x in store["losses"]["val"]], dtype=np.float32)
     val_acc_arr = np.array([x[1] for x in store["metrics"]["val"]], dtype=np.float32)
-    epoch_arr = np.arange(1, len(train_loss_arr) + 1, dtype=np.int64)
+    epoch_arr = np.arange(1, len(train_loss_arr) + 1)
 
     np.save(
         os.path.join(working_dir, f"{dataset_name}_train_losses.npy"), train_loss_arr
     )
     np.save(os.path.join(working_dir, f"{dataset_name}_val_losses.npy"), val_loss_arr)
     np.save(os.path.join(working_dir, f"{dataset_name}_val_accuracy.npy"), val_acc_arr)
-    np.save(os.path.join(working_dir, f"{dataset_name}_epochs.npy"), epoch_arr)
 
     plt.figure(figsize=(7, 4))
     plt.plot(epoch_arr, train_loss_arr, label="train_loss")
@@ -627,8 +580,6 @@ for dataset_name in dataset_names:
                 s["shift_robust_accuracy_gain_gated"],
                 s["srag_always"],
                 s["srag_gated"],
-                s["num_adapt_batches_always"],
-                s["num_adapt_batches_gated"],
             ]
         )
 
@@ -640,7 +591,8 @@ np.save(
 
 for dataset_name in dataset_names:
     keys = list(experiment_data[dataset_name]["config_results"].keys())
-    labels, none_scores, always_scores, gated_scores = [], [], [], []
+    labels = []
+    none_scores, always_scores, gated_scores = [], [], []
     for k in keys:
         e = experiment_data[dataset_name]["config_results"][k]
         labels.append(
