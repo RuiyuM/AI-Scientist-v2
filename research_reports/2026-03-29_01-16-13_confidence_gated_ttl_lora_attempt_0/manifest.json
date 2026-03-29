@@ -1,28 +1,28 @@
 {
   "source_experiment_dir": "experiments/2026-03-29_01-16-13_confidence_gated_ttl_lora_attempt_0",
   "snapshot_dir": "research_reports/2026-03-29_01-16-13_confidence_gated_ttl_lora_attempt_0",
-  "snapshot_time_utc": "2026-03-29T03:11:05.008106+00:00",
+  "snapshot_time_utc": "2026-03-29T03:21:11.928622+00:00",
   "file_count": 4,
   "files": [
     {
       "path": "bfts_config.yaml",
       "size_bytes": 1170,
-      "mtime_utc": "2026-03-29T03:11:04.991238+00:00"
+      "mtime_utc": "2026-03-29T03:21:11.913891+00:00"
     },
     {
       "path": "idea.json",
       "size_bytes": 4725,
-      "mtime_utc": "2026-03-29T03:11:04.986238+00:00"
+      "mtime_utc": "2026-03-29T03:21:11.910891+00:00"
     },
     {
       "path": "idea.md",
       "size_bytes": 4579,
-      "mtime_utc": "2026-03-29T03:11:04.979238+00:00"
+      "mtime_utc": "2026-03-29T03:21:11.903891+00:00"
     },
     {
       "path": "manifest.json",
       "size_bytes": 777,
-      "mtime_utc": "2026-03-29T03:00:58.237200+00:00"
+      "mtime_utc": "2026-03-29T03:11:05.007238+00:00"
     }
   ]
 }
