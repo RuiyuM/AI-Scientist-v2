@@ -1,130 +1,187 @@
 import os
 import numpy as np
 
-working_dir = os.path.join(os.getcwd(), "working")
-file_path = os.path.join(working_dir, "experiment_data.npy")
 
-experiment_data = np.load(file_path, allow_pickle=True).item()
+def load_experiment_data():
+    working_dir = os.path.join(os.getcwd(), "working")
+    file_path = os.path.join(working_dir, "experiment_data.npy")
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Could not find experiment data file: {file_path}")
+    return np.load(file_path, allow_pickle=True).item()
 
 
-def get_last_metric_value(metric_list):
-    if not metric_list:
+def safe_last_pair_value(seq):
+    if seq is None or len(seq) == 0:
         return None
-    last_item = metric_list[-1]
+    last_item = seq[-1]
     if isinstance(last_item, (list, tuple)) and len(last_item) >= 2:
         return last_item[1]
     return last_item
 
 
+def safe_best_min_pair_value(seq):
+    if seq is None or len(seq) == 0:
+        return None
+    valid = []
+    for item in seq:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            valid.append(item[1])
+    if len(valid) == 0:
+        return None
+    return min(valid)
+
+
+def safe_best_max_pair_value(seq):
+    if seq is None or len(seq) == 0:
+        return None
+    valid = []
+    for item in seq:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            valid.append(item[1])
+    if len(valid) == 0:
+        return None
+    return max(valid)
+
+
 def format_value(value):
     if value is None:
         return "N/A"
-    if isinstance(value, float):
-        return f"{value:.6f}"
+    if isinstance(value, (float, np.floating)):
+        return f"{float(value):.6f}"
     return str(value)
 
 
-def print_metric(dataset_name, metric_name, value):
-    print(f"Dataset: {dataset_name}")
+def print_metric(metric_name, value):
     print(f"{metric_name}: {format_value(value)}")
 
 
-def print_stream_results(dataset_name, stream_results):
-    if not stream_results:
-        return
-
-    mode_to_label = {
-        "frozen": "frozen stream accuracy",
-        "always": "always-update stream accuracy",
-        "gated": "gated stream accuracy",
-    }
-    trigger_to_label = {
-        "frozen": "frozen trigger rate",
-        "always": "always-update trigger rate",
-        "gated": "gated trigger rate",
-    }
-
-    for mode in ["frozen", "always", "gated"]:
-        if mode in stream_results:
-            mode_results = stream_results[mode]
-            if "Shifted-Stream Accuracy" in mode_results:
-                print_metric(
-                    dataset_name,
-                    mode_to_label[mode],
-                    mode_results["Shifted-Stream Accuracy"],
-                )
-            if "trigger_rate" in mode_results:
-                print_metric(
-                    dataset_name,
-                    trigger_to_label[mode],
-                    mode_results["trigger_rate"],
-                )
-
-
-for dataset_name, dataset_info in experiment_data.items():
-    print(f"\n{'=' * 60}")
+def print_source_training_metrics(dataset_name, dataset_payload):
     print(f"Dataset: {dataset_name}")
-    print(f"{'=' * 60}")
 
-    if dataset_name == "synthetic_reasoning_stream":
-        selected_epochs = dataset_info.get("selected_epochs", None)
-        selected_hparams = dataset_info.get("selected_hparams", None)
-
-        print_metric(
-            dataset_name,
-            "selected number of training epochs",
-            selected_epochs,
-        )
-
-        if selected_hparams is not None:
-            print_metric(
-                dataset_name,
-                "selected learning rate",
-                selected_hparams.get("lr", None),
-            )
-            print_metric(
-                dataset_name,
-                "selected batch size",
-                selected_hparams.get("batch_size", None),
-            )
-
-    metrics = dataset_info.get("metrics", {})
-    losses = dataset_info.get("losses", {})
-
-    train_accuracy = get_last_metric_value(metrics.get("train", []))
-    validation_accuracy = get_last_metric_value(metrics.get("val", []))
-    test_metrics_entry = get_last_metric_value(metrics.get("test", []))
-
-    train_loss = get_last_metric_value(losses.get("train", []))
-    validation_loss = get_last_metric_value(losses.get("val", []))
-
-    if train_accuracy is not None:
-        print_metric(dataset_name, "final train accuracy", train_accuracy)
-    if validation_accuracy is not None:
-        print_metric(dataset_name, "final validation accuracy", validation_accuracy)
-    if train_loss is not None:
-        print_metric(dataset_name, "final train loss", train_loss)
-    if validation_loss is not None:
-        print_metric(dataset_name, "final validation loss", validation_loss)
-
-    if isinstance(test_metrics_entry, dict):
-        for key, value in test_metrics_entry.items():
-            pretty_name = key.replace("_", " ")
-            print_metric(dataset_name, f"final {pretty_name}", value)
-
-    severity = dataset_info.get("severity", None)
-    if severity is not None:
-        print_metric(dataset_name, "dataset severity", severity)
-
-    sna_gain = get_last_metric_value(
-        dataset_info.get("shift_normalized_accuracy_gain", [])
+    train_acc_final = safe_last_pair_value(
+        dataset_payload.get("metrics", {}).get("train", [])
     )
-    if sna_gain is not None:
-        print_metric(
-            dataset_name,
-            "final shift normalized accuracy gain",
-            sna_gain,
-        )
+    val_acc_final = safe_last_pair_value(
+        dataset_payload.get("metrics", {}).get("val", [])
+    )
+    train_loss_final = safe_last_pair_value(
+        dataset_payload.get("losses", {}).get("train", [])
+    )
+    val_loss_final = safe_last_pair_value(
+        dataset_payload.get("losses", {}).get("val", [])
+    )
 
-    stream_results = dataset_info.get("stream_results", {})
-    print_stream_results(dataset_name, stream_results)
+    train_acc_best = safe_best_max_pair_value(
+        dataset_payload.get("metrics", {}).get("train", [])
+    )
+    val_acc_best = safe_best_max_pair_value(
+        dataset_payload.get("metrics", {}).get("val", [])
+    )
+    train_loss_best = safe_best_min_pair_value(
+        dataset_payload.get("losses", {}).get("train", [])
+    )
+    val_loss_best = safe_best_min_pair_value(
+        dataset_payload.get("losses", {}).get("val", [])
+    )
+
+    print_metric("final train accuracy", train_acc_final)
+    print_metric("best train accuracy", train_acc_best)
+    print_metric("final validation accuracy", val_acc_final)
+    print_metric("best validation accuracy", val_acc_best)
+    print_metric("final train loss", train_loss_final)
+    print_metric("best train loss", train_loss_best)
+    print_metric("final validation loss", val_loss_final)
+    print_metric("best validation loss", val_loss_best)
+
+    selected_epochs = dataset_payload.get("selected_epochs", None)
+    selected_hparams = dataset_payload.get("selected_hparams", None)
+    if selected_epochs is not None:
+        print_metric("selected training epochs", selected_epochs)
+    if selected_hparams is not None:
+        print_metric("selected source learning rate", selected_hparams.get("lr"))
+        print_metric("selected batch size", selected_hparams.get("batch_size"))
+        print_metric(
+            "selected adaptation learning rate", selected_hparams.get("adapt_lr")
+        )
+        print_metric("selected reset interval", selected_hparams.get("reset_every"))
+        print_metric(
+            "selected entropy threshold", selected_hparams.get("entropy_thresh")
+        )
+        print_metric("selected margin threshold", selected_hparams.get("margin_thresh"))
+
+    print()
+
+
+def print_stream_dataset_metrics(dataset_name, dataset_payload):
+    print(f"Dataset: {dataset_name}")
+
+    severity = dataset_payload.get("severity", None)
+    print_metric("dataset severity", severity)
+
+    stream_results = dataset_payload.get("stream_results", {})
+    frozen = stream_results.get("frozen", {})
+    always = stream_results.get("always", {})
+    gated = stream_results.get("gated", {})
+
+    print_metric("frozen-stream test accuracy", frozen.get("Shifted-Stream Accuracy"))
+    print_metric("frozen-stream trigger rate", frozen.get("trigger_rate"))
+    print_metric(
+        "always-adapted-stream test accuracy", always.get("Shifted-Stream Accuracy")
+    )
+    print_metric("always-adapted-stream trigger rate", always.get("trigger_rate"))
+    print_metric(
+        "gated-adapted-stream test accuracy", gated.get("Shifted-Stream Accuracy")
+    )
+    print_metric("gated-adapted-stream trigger rate", gated.get("trigger_rate"))
+
+    sna_gain = safe_last_pair_value(
+        dataset_payload.get("shift_normalized_accuracy_gain", [])
+    )
+    print_metric("shift-normalized accuracy gain", sna_gain)
+
+    test_metrics_entries = dataset_payload.get("metrics", {}).get("test", [])
+    if len(test_metrics_entries) > 0:
+        test_metrics = safe_last_pair_value(test_metrics_entries)
+        if isinstance(test_metrics, dict):
+            print_metric(
+                "frozen-stream test accuracy (detailed)", test_metrics.get("frozen_acc")
+            )
+            print_metric(
+                "always-adapted-stream test accuracy (detailed)",
+                test_metrics.get("always_acc"),
+            )
+            print_metric(
+                "gated-adapted-stream test accuracy (detailed)",
+                test_metrics.get("gated_acc"),
+            )
+            print_metric(
+                "shift-normalized accuracy gain (detailed)",
+                test_metrics.get("shift_normalized_accuracy_gain"),
+            )
+
+    predictions = dataset_payload.get("predictions", [])
+    ground_truth = dataset_payload.get("ground_truth", [])
+    print_metric("number of gated predictions", len(predictions))
+    print_metric("number of ground-truth labels", len(ground_truth))
+
+    print()
+
+
+experiment_data = load_experiment_data()
+
+dataset_order = [
+    "synthetic_reasoning_stream",
+    "feature_permutation_stream",
+    "nonlinear_boundary_stream",
+    "label_flip_stream",
+    "correlated_noise_stream",
+]
+
+if "synthetic_reasoning_stream" in experiment_data:
+    print_source_training_metrics(
+        "synthetic_reasoning_stream", experiment_data["synthetic_reasoning_stream"]
+    )
+
+for dataset_name in dataset_order:
+    if dataset_name in experiment_data:
+        print_stream_dataset_metrics(dataset_name, experiment_data[dataset_name])
