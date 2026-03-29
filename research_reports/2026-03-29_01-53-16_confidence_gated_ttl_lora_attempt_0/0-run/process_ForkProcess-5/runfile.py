@@ -2,114 +2,156 @@ import os
 import numpy as np
 
 working_dir = os.path.join(os.getcwd(), "working")
-file_path = os.path.join(working_dir, "experiment_data.npy")
+experiment_path = os.path.join(working_dir, "experiment_data.npy")
 
-experiment_data = np.load(file_path, allow_pickle=True).item()
+experiment_data = np.load(experiment_path, allow_pickle=True).item()
 
-dataset_names = ["arc_easy_shift", "pubmedqa_burst", "mmlu_clustered"]
-ablation_types = ["pseudo_label_self_training", "entropy_minimization"]
+ablation_key = "lora_capacity_ablation"
+stream_modes = ["frozen", "always", "gated", "reset"]
 
 
 def safe_last(seq):
     return seq[-1] if seq else None
 
 
-def safe_best(seq, value_index, mode="max"):
-    if not seq:
-        return None
-    if mode == "max":
-        return max(seq, key=lambda x: x[value_index])
-    if mode == "min":
-        return min(seq, key=lambda x: x[value_index])
-    raise ValueError("mode must be 'max' or 'min'")
+def print_rank_dataset_metrics(rank_key, dataset_name, dataset_blob):
+    print(f"Dataset: {dataset_name} | Rank: {rank_key}")
 
+    metrics = dataset_blob.get("metrics", {})
+    losses = dataset_blob.get("losses", {})
+    thresholds = dataset_blob.get("thresholds", {})
+    summary = dataset_blob.get("summary", {})
 
-def parse_test_metrics(test_entries):
-    parsed = {}
-    for entry in test_entries:
-        if len(entry) != 7:
-            continue
-        mode_name, acc, ece, trigger_rate, update_rate, overhead, srus = entry
-        parsed[mode_name] = {
-            "test accuracy": acc,
-            "test expected calibration error": ece,
-            "test trigger rate": trigger_rate,
-            "test update rate": update_rate,
-            "test overhead": overhead,
-            "test SRUS": srus,
-        }
-    return parsed
+    train_metric_final = safe_last(metrics.get("train", []))
+    val_metric_final = safe_last(metrics.get("val", []))
+    train_loss_final = safe_last(losses.get("train", []))
+    val_loss_final = safe_last(losses.get("val", []))
 
+    if train_metric_final is not None:
+        epoch, train_accuracy, train_score = train_metric_final
+        print(f"  final train epoch: {epoch}")
+        print(f"  final train accuracy: {train_accuracy}")
+        print(f"  final train score: {train_score}")
+    else:
+        print("  final train epoch: N/A")
+        print("  final train accuracy: N/A")
+        print("  final train score: N/A")
 
-for ablation in ablation_types:
-    print(f"\nAblation: {ablation}")
-    for dataset_name in dataset_names:
-        print(f"\nDataset: {dataset_name}")
-        ds_block = experiment_data.get(ablation, {}).get(dataset_name, {})
+    if val_metric_final is not None:
+        epoch, validation_accuracy, validation_srus_like_score = val_metric_final
+        print(f"  final validation epoch: {epoch}")
+        print(f"  final validation accuracy: {validation_accuracy}")
+        print(f"  final validation score: {validation_srus_like_score}")
+    else:
+        print("  final validation epoch: N/A")
+        print("  final validation accuracy: N/A")
+        print("  final validation score: N/A")
 
-        train_metrics = ds_block.get("metrics", {}).get("train", [])
-        val_metrics = ds_block.get("metrics", {}).get("val", [])
-        test_metrics = ds_block.get("metrics", {}).get("test", [])
+    if train_loss_final is not None:
+        epoch, train_loss = train_loss_final
+        print(f"  final train loss: {train_loss}")
+    else:
+        print("  final train loss: N/A")
 
-        train_losses = ds_block.get("losses", {}).get("train", [])
-        val_losses = ds_block.get("losses", {}).get("val", [])
+    if val_loss_final is not None:
+        epoch, validation_loss = val_loss_final
+        print(f"  final validation loss: {validation_loss}")
+    else:
+        print("  final validation loss: N/A")
 
-        final_train = safe_last(train_metrics)
-        best_train_acc = safe_best(train_metrics, 1, mode="max")
-        final_train_loss = safe_last(train_losses)
-        best_train_loss = safe_best(train_losses, 1, mode="min")
+    if thresholds:
+        print(f"  entropy threshold: {thresholds.get('entropy', 'N/A')}")
+        print(f"  margin threshold: {thresholds.get('margin', 'N/A')}")
+        print(f"  confidence threshold: {thresholds.get('conf', 'N/A')}")
+    else:
+        print("  entropy threshold: N/A")
+        print("  margin threshold: N/A")
+        print("  confidence threshold: N/A")
 
-        final_val = safe_last(val_metrics)
-        best_val_acc = safe_best(val_metrics, 1, mode="max")
-        best_val_srus = safe_best(val_metrics, 2, mode="max")
-        final_val_loss = safe_last(val_losses)
-        best_val_loss = safe_best(val_losses, 1, mode="min")
+    if summary:
+        best_accuracy_mode = max(
+            summary.items(), key=lambda kv: kv[1].get("acc", float("-inf"))
+        )
+        best_ece_mode = min(
+            summary.items(), key=lambda kv: kv[1].get("ece", float("inf"))
+        )
+        best_srus_mode = max(
+            summary.items(), key=lambda kv: kv[1].get("srus", float("-inf"))
+        )
+        best_trigger_mode = max(
+            summary.items(), key=lambda kv: kv[1].get("trigger_rate", float("-inf"))
+        )
+        best_update_mode = max(
+            summary.items(), key=lambda kv: kv[1].get("update_rate", float("-inf"))
+        )
+        best_reset_mode = max(
+            summary.items(), key=lambda kv: kv[1].get("reset_rate", float("-inf"))
+        )
+        best_overhead_mode = min(
+            summary.items(), key=lambda kv: kv[1].get("overhead", float("inf"))
+        )
 
-        if final_train is not None:
-            epoch, train_acc, train_srus_like = final_train
-            print(f"final train epoch: {epoch}")
-            print(f"final train accuracy: {train_acc:.6f}")
-            print(f"final stored train score: {train_srus_like:.6f}")
-        if best_train_acc is not None:
-            epoch, train_acc, _ = best_train_acc
-            print(f"best train accuracy epoch: {epoch}")
-            print(f"best train accuracy: {train_acc:.6f}")
-        if final_train_loss is not None:
-            epoch, train_loss = final_train_loss
-            print(f"final train loss epoch: {epoch}")
-            print(f"final train loss: {train_loss:.6f}")
-        if best_train_loss is not None:
-            epoch, train_loss = best_train_loss
-            print(f"best train loss epoch: {epoch}")
-            print(f"best train loss: {train_loss:.6f}")
+        print(
+            f"  best test accuracy: {best_accuracy_mode[1].get('acc')} (mode: {best_accuracy_mode[0]})"
+        )
+        print(
+            f"  best test expected calibration error: {best_ece_mode[1].get('ece')} (mode: {best_ece_mode[0]})"
+        )
+        print(
+            f"  best test SRUS: {best_srus_mode[1].get('srus')} (mode: {best_srus_mode[0]})"
+        )
+        print(
+            f"  best test trigger rate: {best_trigger_mode[1].get('trigger_rate')} (mode: {best_trigger_mode[0]})"
+        )
+        print(
+            f"  best test update rate: {best_update_mode[1].get('update_rate')} (mode: {best_update_mode[0]})"
+        )
+        print(
+            f"  best test reset rate: {best_reset_mode[1].get('reset_rate')} (mode: {best_reset_mode[0]})"
+        )
+        print(
+            f"  best test overhead: {best_overhead_mode[1].get('overhead')} (mode: {best_overhead_mode[0]})"
+        )
 
-        if final_val is not None:
-            epoch, val_acc, val_srus = final_val
-            print(f"final validation epoch: {epoch}")
-            print(f"final validation accuracy: {val_acc:.6f}")
-            print(f"final validation SRUS: {val_srus:.6f}")
-        if best_val_acc is not None:
-            epoch, val_acc, _ = best_val_acc
-            print(f"best validation accuracy epoch: {epoch}")
-            print(f"best validation accuracy: {val_acc:.6f}")
-        if best_val_srus is not None:
-            epoch, _, val_srus = best_val_srus
-            print(f"best validation SRUS epoch: {epoch}")
-            print(f"best validation SRUS: {val_srus:.6f}")
-        if final_val_loss is not None:
-            epoch, val_loss = final_val_loss
-            print(f"final validation loss epoch: {epoch}")
-            print(f"final validation loss: {val_loss:.6f}")
-        if best_val_loss is not None:
-            epoch, val_loss = best_val_loss
-            print(f"best validation loss epoch: {epoch}")
-            print(f"best validation loss: {val_loss:.6f}")
-
-        parsed_test = parse_test_metrics(test_metrics)
-        for mode_name in ["frozen", "always", "gated", "reset"]:
-            if mode_name not in parsed_test:
+        for mode in stream_modes:
+            mode_blob = summary.get(mode)
+            if mode_blob is None:
                 continue
-            print(f"test evaluation mode: {mode_name}")
-            mode_metrics = parsed_test[mode_name]
-            for metric_name, metric_value in mode_metrics.items():
-                print(f"{mode_name} {metric_name}: {metric_value:.6f}")
+            print(f"  final test accuracy [{mode}]: {mode_blob.get('acc', 'N/A')}")
+            print(
+                f"  final test expected calibration error [{mode}]: {mode_blob.get('ece', 'N/A')}"
+            )
+            print(
+                f"  final test trigger rate [{mode}]: {mode_blob.get('trigger_rate', 'N/A')}"
+            )
+            print(
+                f"  final test update rate [{mode}]: {mode_blob.get('update_rate', 'N/A')}"
+            )
+            print(
+                f"  final test reset rate [{mode}]: {mode_blob.get('reset_rate', 'N/A')}"
+            )
+            print(f"  final test overhead [{mode}]: {mode_blob.get('overhead', 'N/A')}")
+            print(f"  final test SRUS [{mode}]: {mode_blob.get('srus', 'N/A')}")
+            print(
+                f"  final adapter rank [{mode}]: {mode_blob.get('adapter_rank', 'N/A')}"
+            )
+            print(
+                f"  final adapter parameter count [{mode}]: {mode_blob.get('adapter_params', 'N/A')}"
+            )
+    else:
+        print("  best test accuracy: N/A")
+        print("  best test expected calibration error: N/A")
+        print("  best test SRUS: N/A")
+        print("  best test trigger rate: N/A")
+        print("  best test update rate: N/A")
+        print("  best test reset rate: N/A")
+        print("  best test overhead: N/A")
+
+    print()
+
+
+ablation_data = experiment_data.get(ablation_key, {})
+
+for rank_key, rank_blob in ablation_data.items():
+    for dataset_name, dataset_blob in rank_blob.items():
+        print_rank_dataset_metrics(rank_key, dataset_name, dataset_blob)
