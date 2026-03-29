@@ -18,12 +18,20 @@ for idx in "${IDX_ARRAY[@]}"; do
 
   run_name="$(basename "${IDEAS_JSON%.json}")-idea${idx}"
   log_path="${REPO_ROOT}/.runtime/${run_name}.log"
+  session_name="scientist-${run_name}"
+  session_name="${session_name//[^[:alnum:]_-]/-}"
 
-  nohup env PYTHONUNBUFFERED=1 bash "${SCRIPT_DIR}/run_scientist.sh" \
-    "${IDEAS_JSON}" \
-    "${CONFIG_PATH}" \
-    "${idx}" \
-    </dev/null > "${log_path}" 2>&1 &
-
-  echo "started ${run_name} pid=$! log=${log_path}"
+  if command -v tmux >/dev/null 2>&1; then
+    tmux kill-session -t "${session_name}" >/dev/null 2>&1 || true
+    tmux new-session -d -s "${session_name}" \
+      "cd '${REPO_ROOT}' && export PYTHONUNBUFFERED=1 && bash '${SCRIPT_DIR}/run_scientist.sh' '${IDEAS_JSON}' '${CONFIG_PATH}' '${idx}' 2>&1 | tee '${log_path}'"
+    echo "started ${run_name} tmux_session=${session_name} log=${log_path}"
+  else
+    nohup env PYTHONUNBUFFERED=1 bash "${SCRIPT_DIR}/run_scientist.sh" \
+      "${IDEAS_JSON}" \
+      "${CONFIG_PATH}" \
+      "${idx}" \
+      </dev/null > "${log_path}" 2>&1 &
+    echo "started ${run_name} pid=$! log=${log_path}"
+  fi
 done
