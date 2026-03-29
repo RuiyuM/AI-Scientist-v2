@@ -1,158 +1,158 @@
 {
   "source_experiment_dir": "experiments/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0",
   "snapshot_dir": "research_reports/2026-03-29_01-53-16_shared_low_rank_stream_adaptation_attempt_0",
-  "snapshot_time_utc": "2026-03-29T03:51:31.142496+00:00",
+  "snapshot_time_utc": "2026-03-29T03:53:33.154647+00:00",
   "file_count": 30,
   "files": [
     {
       "path": "bfts_config.yaml",
       "size_bytes": 1202,
-      "mtime_utc": "2026-03-29T03:51:31.001675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.028518+00:00"
     },
     {
       "path": "idea.json",
       "size_bytes": 4126,
-      "mtime_utc": "2026-03-29T03:51:30.999675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.026518+00:00"
     },
     {
       "path": "idea.md",
       "size_bytes": 3989,
-      "mtime_utc": "2026-03-29T03:51:30.996675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.023518+00:00"
     },
     {
       "path": "manifest.json",
       "size_bytes": 6471,
-      "mtime_utc": "2026-03-29T03:41:25.551525+00:00"
+      "mtime_utc": "2026-03-29T03:51:31.141676+00:00"
     },
     {
       "path": "logs/0-run/unified_tree_viz.html",
       "size_bytes": 113429,
-      "mtime_utc": "2026-03-29T03:51:31.004675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.032518+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/experiment_code.py",
       "size_bytes": 11056,
-      "mtime_utc": "2026-03-29T03:51:31.024675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.051518+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/plotting_code.py",
       "size_bytes": 6376,
-      "mtime_utc": "2026-03-29T03:51:31.021675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.047518+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_batch_adaptation_loss_by_strategy.png",
       "size_bytes": 90951,
-      "mtime_utc": "2026-03-29T03:51:31.055675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.083519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_cumulative_accuracy.png",
       "size_bytes": 38594,
-      "mtime_utc": "2026-03-29T03:51:31.029675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.058518+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_cumulative_accuracy_by_strategy.png",
       "size_bytes": 41921,
-      "mtime_utc": "2026-03-29T03:51:31.045675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.073519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_final_stream_accuracy_bar.png",
       "size_bytes": 33064,
-      "mtime_utc": "2026-03-29T03:51:31.050675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.078518+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_ground_truth_vs_predictions.png",
       "size_bytes": 201363,
-      "mtime_utc": "2026-03-29T03:51:31.060675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.086519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_training_validation_accuracy.png",
       "size_bytes": 42279,
-      "mtime_utc": "2026-03-29T03:51:31.034675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.063518+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_a334a40efc414b42b2de2892dda28ef4_proc_20437/synthetic_stream_training_validation_loss.png",
       "size_bytes": 46897,
-      "mtime_utc": "2026-03-29T03:51:31.039675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.068518+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/experiment_code.py",
       "size_bytes": 11257,
-      "mtime_utc": "2026-03-29T03:51:31.067675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.092519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/plotting_code.py",
       "size_bytes": 6376,
-      "mtime_utc": "2026-03-29T03:51:31.064675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.090518+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_batch_adaptation_loss_by_strategy.png",
       "size_bytes": 90951,
-      "mtime_utc": "2026-03-29T03:51:31.098675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.120519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_cumulative_accuracy.png",
       "size_bytes": 38594,
-      "mtime_utc": "2026-03-29T03:51:31.072675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.096519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_cumulative_accuracy_by_strategy.png",
       "size_bytes": 41921,
-      "mtime_utc": "2026-03-29T03:51:31.087676+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.109519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_final_stream_accuracy_bar.png",
       "size_bytes": 33064,
-      "mtime_utc": "2026-03-29T03:51:31.093676+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.115519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_ground_truth_vs_predictions.png",
       "size_bytes": 201363,
-      "mtime_utc": "2026-03-29T03:51:31.103676+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.124519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_training_validation_accuracy.png",
       "size_bytes": 42279,
-      "mtime_utc": "2026-03-29T03:51:31.076675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.102519+00:00"
     },
     {
       "path": "logs/0-run/experiment_results/experiment_d40bc67bc1894f36bd959b2aa8b3e1a5_proc_20437/synthetic_stream_training_validation_loss.png",
       "size_bytes": 46897,
-      "mtime_utc": "2026-03-29T03:51:31.081676+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.106519+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/best_solution_a334a40efc414b42b2de2892dda28ef4.py",
       "size_bytes": 11056,
-      "mtime_utc": "2026-03-29T03:51:31.129676+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.141519+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/config.yaml",
       "size_bytes": 1721,
-      "mtime_utc": "2026-03-29T03:51:31.121676+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.135519+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/journal.json",
       "size_bytes": 83004,
-      "mtime_utc": "2026-03-29T03:51:31.114676+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.132519+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/tree_plot.html",
       "size_bytes": 113401,
-      "mtime_utc": "2026-03-29T03:51:31.127676+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.138519+00:00"
     },
     {
       "path": "logs/0-run/stage_1_initial_implementation_1_preliminary/notes/stage_progress.json",
       "size_bytes": 12610,
-      "mtime_utc": "2026-03-29T03:51:31.108676+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.128519+00:00"
     },
     {
       "path": "0-run/process_ForkProcess-1/runfile.py",
       "size_bytes": 6376,
-      "mtime_utc": "2026-03-29T03:51:31.009675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.036518+00:00"
     },
     {
       "path": "0-run/process_ForkProcess-2/runfile.py",
       "size_bytes": 7087,
-      "mtime_utc": "2026-03-29T03:51:31.015675+00:00"
+      "mtime_utc": "2026-03-29T03:53:33.041518+00:00"
     }
   ]
 }
